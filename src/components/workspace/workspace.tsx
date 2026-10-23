@@ -7,12 +7,13 @@ import { api, type DocumentDto, type NotebookDto } from "@/lib/client/api";
 import { measurePdfObstacles } from "@/lib/client/pdf-occupancy";
 import { boundsOf, clamp, type Rect } from "@/lib/notebook/geometry";
 import { estimateSolutionHeight, findFreeSpot, SOLUTION_WIDTH } from "@/lib/notebook/placement";
-import type { AiSolutionObject } from "@/lib/notebook/schemas";
+import type { AiSolutionObject, GraphObject } from "@/lib/notebook/schemas";
 import type { Change } from "@/lib/notebook/ops";
 import { currentPage, initialState, reducer } from "@/lib/notebook/store";
 import { newId } from "@/lib/utils";
 import { initialEditor, MAX_ZOOM, MIN_ZOOM, type EditorState } from "./editor";
 import { AiPanel, type InsertRequest } from "./ai-panel";
+import { GraphPanel } from "./graph-panel";
 import { PageCanvas } from "./page-canvas";
 import { Sidebar } from "./sidebar";
 import { DrawingToolbar, TOOL_SHORTCUTS } from "./toolbar";
@@ -79,6 +80,7 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
   const [exporting, setExporting] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiFocus, setAiFocus] = useState(0);
+  const [graphOpen, setGraphOpen] = useState(false);
   const [textSelection, setTextSelection] = useState("");
   const [selectionAnchor, setSelectionAnchor] = useState<{ x: number; y: number } | null>(null);
 
@@ -157,6 +159,23 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
       return false;
     }
   };
+
+  const insertGraph = useCallback((expressions: GraphObject["data"]["expressions"], viewport: GraphObject["data"]["viewport"]) => {
+    if (!page) return;
+    const width = Math.min(400, page.width - 72);
+    const height = 300;
+    const obstacles = page.objects.map(boundsOf);
+    const spot = findFreeSpot({ page, obstacles, anchor: null, size: { width, height } });
+    const pos = spot.kind === "free" ? { x: spot.x, y: spot.y } : { x: 36, y: 36 };
+    const z = page.objects.reduce((m, o) => Math.max(m, o.zIndex), 0) + 1;
+    const obj: GraphObject = {
+      id: newId(), type: "GRAPH", source: "USER",
+      x: pos.x, y: pos.y, width, height, rotation: 0, zIndex: z,
+      linkedToId: expressions[0]?.sourceObjectId ?? null, metadata: null,
+      data: { expressions, viewport },
+    };
+    dispatch({ type: "commit", pageId: page.id, changes: [{ before: null, after: obj }] });
+  }, [page, dispatch]);
 
   const exportPdf = async () => {
     setExporting(true);
@@ -383,6 +402,8 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
         exporting={exporting}
         aiOpen={aiOpen}
         onToggleAi={() => setAiOpen((o) => !o)}
+        graphOpen={graphOpen}
+        onToggleGraph={() => setGraphOpen((o) => !o)}
       />
       <div className="flex min-h-0 flex-1">
         {sidebarOpen && (
@@ -436,6 +457,13 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
             </div>
           )}
         </main>
+        {graphOpen && (
+          <GraphPanel
+            page={page}
+            onClose={() => setGraphOpen(false)}
+            onInsertGraph={insertGraph}
+          />
+        )}
         {aiOpen && (
           <AiPanel
             notebookId={notebook.id}
@@ -449,6 +477,7 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
               if (target) goToPage(target.id);
             }}
             onInsertSolution={insertSolution}
+            onFlushSave={flush}
             focusSignal={aiFocus}
             onClose={() => setAiOpen(false)}
           />

@@ -37,9 +37,75 @@ See [`.env.example`](.env.example) — placeholders only. **Secrets are server-s
 | `STORAGE_PROVIDER` (`local`\|`s3`), `LOCAL_STORAGE_DIR` | no (default: local `./storage-data`) | Where uploaded PDFs live |
 | `OBJECT_STORAGE_ENDPOINT/REGION/BUCKET/ACCESS_KEY/SECRET_KEY` | when `STORAGE_PROVIDER=s3` | Any S3-compatible store (AWS S3, R2, MinIO, B2) |
 | `MAX_PDF_MB` | no (default 50) | Upload size limit |
-| `LLM_PROVIDER`, `OPENAI_*`, `GROQ_*` | phase 3 | AI tutor (optional — the notebook works without) |
+| `LLM_PROVIDER` (`openai`\|`groq`\|`none`), `OPENAI_API_KEY`, `OPENAI_MODEL` | AI tutor | Enable the AI panel. Set to `none` to disable. |
+| `OPENAI_BASE_URL` | AI tutor | Custom endpoint (Azure OpenAI, LM Studio, Ollama, etc.). Default: `https://api.openai.com/v1` |
+| `GROQ_API_KEY`, `GROQ_MODEL` | AI tutor (Groq) | Alternative to OpenAI |
+| `LLM_TIMEOUT_MS` | no (default 60000) | Per-request upstream timeout in milliseconds |
+| `LLM_MAX_OUTPUT_TOKENS` | no (default 1800) | Maximum tokens in each AI response |
+| `AI_RATE_LIMIT_PER_MIN` | no (default 20) | Requests per user per minute |
+| `LLM_SUPPORTS_VISION/JSON_SCHEMA/JSON_OBJECT/STREAMING` | no | Override capability detection for unknown models (`true`/`false`) |
 | `STT_PROVIDER`, `TTS_PROVIDER`, `GRADIUM_API_KEY`, `OPENAI_TTS_*` | phase 6 | Voice (optional) |
-| `MATH_SERVICE_URL` | phase 4 | SymPy verification service (optional) |
+| `MATH_SERVICE_URL` | phase 4 | SymPy verification service URL (optional) |
+
+## AI tutor setup
+
+The notebook works fully without an AI provider — drawing, PDFs and export are not affected. To enable the AI panel:
+
+### OpenAI
+
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-…
+OPENAI_MODEL=gpt-4o-mini        # recommended: cheap, fast, vision-capable
+```
+
+Recommended models in order of capability: `gpt-4o`, `gpt-4o-mini`, `o3-mini`. Vision (image of the circled region) requires `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, or any `o3`/`o4` model.
+
+### Groq (fast, free tier available)
+
+```env
+LLM_PROVIDER=groq
+GROQ_API_KEY=gsk_…
+GROQ_MODEL=llama-4-scout-17b-16e-instruct
+```
+
+### Custom / self-hosted endpoint (OpenAI-compatible)
+
+```env
+LLM_PROVIDER=openai
+OPENAI_BASE_URL=http://localhost:11434/v1   # e.g. Ollama
+OPENAI_API_KEY=ollama
+OPENAI_MODEL=llama3.2
+LLM_SUPPORTS_VISION=false
+LLM_SUPPORTS_JSON_SCHEMA=false
+LLM_SUPPORTS_JSON_OBJECT=false
+```
+
+The `LLM_SUPPORTS_*` overrides tell the server what the model can do when it is not in the built-in capability table (`src/lib/server/ai/capabilities.ts`). Unknown models default to streaming-only with no vision and no JSON modes.
+
+### Testing without an API key
+
+```bash
+node scripts/fake-llm.mjs 4010        # starts a local OpenAI-compatible stub
+```
+
+Then:
+
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-test
+OPENAI_BASE_URL=http://127.0.0.1:4010/v1
+OPENAI_MODEL=gpt-4o-mini
+```
+
+The fake LLM returns structured answers and echoes the request so you can inspect what the server sends to the model.
+
+### Known limitations of the AI tutor
+
+- Answers are labelled **"AI-generated · not verified"**. The UI never shows "Verified" unless deterministic SymPy verification succeeds (Phase 4).
+- Ink (handwriting) is sent as an image to vision models only. Non-vision models receive the stroke count but cannot read the handwriting.
+- No OCR for scanned PDF pages; they are flagged "Scanned page · no selectable text".
+- Rate limiting is per-user, in-memory, and resets on server restart.
 
 ## Commands
 
@@ -122,7 +188,7 @@ Mouse, touch and stylus via Pointer Events. Stylus pressure is recorded only whe
 
 1. ✅ Working notebook (library, pages, ink, shapes, text, equations, selection, lasso, autosave, undo/redo)
 2. ✅ PDF import, rendering, annotation, export
-3. Context-aware AI panel (provider abstraction, selection-aware requests)
+3. ✅ Context-aware AI panel (streaming, structured answers, selection-aware, rate limiting, conversation history)
 4. Equation graphing + SymPy verification
 5. Handwriting recognition, mistake detection, solution placement
 6. Voice

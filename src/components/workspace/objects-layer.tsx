@@ -1,6 +1,7 @@
 "use client";
-import { memo, useLayoutEffect, useRef } from "react";
-import type { NotebookObject } from "@/lib/notebook/schemas";
+import { memo, useLayoutEffect, useMemo, useRef } from "react";
+import type { EquationObject, GraphObject, NotebookObject } from "@/lib/notebook/schemas";
+import { GraphCard } from "./graph-panel";
 import { Latex } from "./math";
 import { MathText } from "./math-text";
 
@@ -89,14 +90,26 @@ const Item = memo(function Item({ o, onMeasure }: { o: NotebookObject; onMeasure
   }
 });
 
+// GraphItem is handled separately (needs equationMap) — see ObjectsLayer.
+
 /** Editable text and mathematical objects, rendered as real DOM so text stays crisp and selectable. */
 export function ObjectsLayer({ objects, zoom, width, height, onMeasure }: { objects: NotebookObject[]; zoom: number; width: number; height: number; onMeasure?: (id: string, height: number) => void }) {
+  const equationMap = useMemo(() => {
+    const m = new Map<string, EquationObject>();
+    for (const o of objects) if (o.type === "EQUATION") m.set(o.id, o);
+    return m;
+  }, [objects]);
+
   return (
     <div
       aria-hidden={false}
       style={{ position: "absolute", left: 0, top: 0, width, height, transform: `scale(${zoom})`, transformOrigin: "0 0", pointerEvents: "none" }}
     >
-      {objects.map((o) => (o.type === "TEXT" || o.type === "EQUATION" || o.type === "AI_SOLUTION" ? <Item key={o.id} o={o} onMeasure={onMeasure} /> : null))}
+      {objects.map((o) => {
+        if (o.type === "TEXT" || o.type === "EQUATION" || o.type === "AI_SOLUTION") return <Item key={o.id} o={o} onMeasure={onMeasure} />;
+        if (o.type === "GRAPH") return <GraphCard key={o.id} o={o as GraphObject} equationMap={equationMap} />;
+        return null;
+      })}
     </div>
   );
 }

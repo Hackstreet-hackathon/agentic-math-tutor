@@ -25,6 +25,7 @@ import {
 } from "pdf-lib";
 import { strokeOutline } from "@/lib/notebook/ops";
 import type { NotebookObject } from "@/lib/notebook/schemas";
+import { detectGraphable } from "@/lib/graph/detect";
 import { latexToVector } from "./math-vector";
 
 /**
@@ -283,8 +284,11 @@ async function drawObject(p: Painter, fonts: FontCache, o: NotebookObject): Prom
     case "AI_SOLUTION":
       await drawSolution(p, fonts, o);
       return true;
+    case "GRAPH":
+      await drawGraph(p, fonts, o);
+      return true;
     default:
-      // GRAPH / IMAGE / SELECTION are exported once those object types ship.
+      // IMAGE / SELECTION are exported as a placeholder.
       return o.type === "SELECTION";
   }
 }
@@ -441,4 +445,82 @@ async function drawSolution(p: Painter, fonts: FontCache, o: Extract<NotebookObj
   p.fillPolygon([[o.x, o.y], [o.x + o.width, o.y], [o.x + o.width, o.y + height], [o.x, o.y + height]], "#eef1ff", 0.85);
   p.fillPolygon([[o.x, o.y], [o.x + 4, o.y], [o.x + 4, o.y + height], [o.x, o.y + height]], "#3b5bdb");
   for (const op of ops) op();
+}
+
+/* ---------- graph export ---------- */
+
+/** Convert a function-plot JS expression to a safe JS evaluator. */
+function makeFn(expr: string): ((x: number) => number) | null {
+  try {
+    // Replace ^ with ** for JS exponentiation
+    const js = expr.replace(/\^/g, "**");
+    // eslint-disable-next-line no-new-func
+    const fn = new Function("x", "Math", `"use strict"; return (${js});`) as (x: number, M: typeof Math) => number;
+    // Smoke test
+    const v = fn(0, Math);
+    if (!isFinite(v) && !isNaN(v)) return null;
+    return (x: number) => {
+      try {
+        const y = fn(x, Math);
+        return typeof y === "number" ? y : NaN;
+      } catch {
+        return NaN;
+      }
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function drawGraph(p: Painter, fonts: FontCache, o: Extract<NotebookObject, { type: "GRAPH" }>) {
+  const { x: ox, y: oy, width: w, height: h } = o;
+  const { xmin, xmax, ymin, ymax } = o.data.viewport;
+  const font = await fonts.get("sans");
+  const pad = 4;
+
+  // Border + white background
+  p.fillPolygon([[ox, oy], [ox + w, oy], [ox + w, oy + h], [ox, oy + h]], "#ffffff", 0.95);
+  p.strokePolyline([[ox, oy], [ox + w, oy], [ox + w, oy + h], [ox, oy + h], [ox, oy]], "#cccccc", 1, 1, true);
+
+  const innerX = ox + pad;
+  const innerY = oy + pad;
+  const innerW = w - pad * 2;
+  const innerH = h - pad * 2;
+
+  const toPageX = (gx: number) => innerX + ((gx - xmin) / (xmax - xmin)) * innerW;
+  const toPageY = (gy: number) => innerY + (1 - (gy - ymin) / (ymax - ymin)) * innerH;
+
+  // Axes
+  if (ymin < 0 && ymax > 0) {
+    const ay = toPageY(0);
+    p.strokePolyline([[innerX, ay], [innerX + innerW, ay]], "#aaaaaa", 0.5);
+  }
+  if (xmin < 0 && xmax > 0) {
+    const ax = toPageX(0);
+    p.strokePolyline([[ax, innerY], [ax, innerY + innerH]], "#aaaaaa", 0.5);
+  }
+
+  // Function traces
+  const N = 200;
+  for (const expr of o.data.expressions) {
+    const detected = detectGraphable(expr.latex);
+    if (detected.kind !== "ok") continue;
+    const fn = makeFn(detected.fn);
+    if (!fn) continue;
+    const pts: Pt[] = [];
+    for (let i = 0; i <= N; i++) {
+      const gx = xmin + (i / N) * (xmax - xmin);
+      const gy = fn(gx);
+      if (!isFinite(gy) || gy < ymin - (ymax - ymin) || gy > ymax + (ymax - ymin)) {
+        if (pts.length >= 2) p.strokePolyline(pts, expr.color, 1.5);
+        pts.length = 0;
+        continue;
+      }
+      pts.push([toPageX(gx), toPageY(gy)]);
+    }
+    if (pts.length >= 2) p.strokePolyline(pts, expr.color, 1.5);
+  }
+
+  // Axis labels
+  p.text(`[${xmin}, ${xmax}]`, innerX + 2, innerY + innerH - 2, font, 7, "#888888");
 }

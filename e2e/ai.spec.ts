@@ -171,6 +171,9 @@ test.describe("AI tutor (configured; provider is a local fake)", () => {
     await createNotebook(page, `Ink ${Date.now()}`);
     await drawStroke(page, [150, 200], [330, 230]);
     await drawStroke(page, [150, 250], [330, 270]);
+    // Autosave has an 800 ms debounce; the server builds handwriting context from the DB,
+    // so we must wait for the strokes to be persisted before the AI request goes out.
+    await waitSaved(page);
     await lasso(page, [[110, 150], [250, 140], [390, 160], [400, 290], [250, 310], [120, 290]], 816);
     await page.getByTestId("ask-ai").click();
     await page.getByTestId("action-check").click();

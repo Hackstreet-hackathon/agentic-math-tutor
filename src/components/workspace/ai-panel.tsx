@@ -55,6 +55,8 @@ export function AiPanel(props: {
   onClearSelection: () => void;
   onGoToPageNumber: (n: number) => void;
   onInsertSolution: (req: InsertRequest) => Promise<boolean>;
+  /** Called before every AI request so unsaved ink/objects reach the server's context builder. */
+  onFlushSave: () => Promise<void>;
   focusSignal: number;
   onClose: () => void;
 }) {
@@ -124,6 +126,9 @@ export function AiPanel(props: {
       const ac = new AbortController();
       abortRef.current = ac;
 
+      // Flush unsaved objects so the server's context builder can find them in the DB.
+      await props.onFlushSave();
+
       const region = editor.region;
       const hasInk = page.objects.some((o) => o.type === "INK" && editor.selectedIds.includes(o.id));
       let image: string | null = null;
@@ -187,7 +192,7 @@ export function AiPanel(props: {
         if (abortRef.current === ac) setBusy(false);
       }
     },
-    [status, editor.region, editor.selectedIds, hasSelection, page, notebookId, conversationId, textSelection],
+    [status, editor.region, editor.selectedIds, hasSelection, page, notebookId, conversationId, textSelection, props.onFlushSave],
   );
 
   const stop = () => abortRef.current?.abort();

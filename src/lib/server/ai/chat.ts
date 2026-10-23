@@ -9,6 +9,7 @@ import { rateLimit } from "../rate-limit";
 import { env } from "../env";
 import { buildAgentContext, summarizeContext } from "./context";
 import { getLLM } from "./factory";
+import { autoVerify } from "../math/verify";
 import { buildMessages, type HistoryTurn } from "./prompt";
 import { ProviderError, type LLMProvider } from "./types";
 
@@ -147,10 +148,16 @@ export async function* runChat(opts: { userId: string; body: ChatRequest; provid
   }
 
   const { answer, malformed } = parseModelOutput(text, intent);
+
+  // Run deterministic verification when the SymPy service is configured.
+  const verification: Verification = malformed
+    ? UNVERIFIED
+    : await autoVerify({ intent, question: body.message, finalAnswer: answer.finalAnswer, steps: answer.steps.filter((s) => s.latex).map((s) => ({ latex: s.latex! })), signal }).catch(() => UNVERIFIED);
+
   const display = [answer.summary, answer.finalAnswer, answer.hint, answer.needsClarification].filter(Boolean).join("\n").slice(0, 4000);
-  const stored: StoredAnswer = { answer, verification: UNVERIFIED, ...(malformed ? { malformed: true } : {}) };
+  const stored: StoredAnswer = { answer, verification, ...(malformed ? { malformed: true } : {}) };
   const messageId = await saveAssistant(conversation.id, stored, display || "(no text)", contextMeta, { provider: provider.id, model, usage, latencyMs });
-  yield { event: "final", data: { messageId, answer, verification: UNVERIFIED, malformed, usage, latencyMs } };
+  yield { event: "final", data: { messageId, answer, verification, malformed, usage, latencyMs } };
 }
 
 /** Strict JSON first, then the first {...} block, then the raw text (flagged as malformed). */

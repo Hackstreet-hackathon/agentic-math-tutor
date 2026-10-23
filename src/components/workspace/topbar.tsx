@@ -1,5 +1,5 @@
 "use client";
-import { AlertTriangle, ChevronLeft, ChevronRight, CloudCheck, Download, Loader2, PanelLeft, Sparkles, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertTriangle, BarChart3, ChevronLeft, ChevronRight, CloudCheck, Download, Loader2, PanelLeft, Sparkles, ZoomIn, ZoomOut } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { Tip } from "@/components/ui/tooltip";
@@ -22,6 +22,8 @@ export function TopBar({
   exporting,
   aiOpen,
   onToggleAi,
+  graphOpen,
+  onToggleGraph,
 }: {
   title: string;
   onRename: (title: string) => void;
@@ -37,6 +39,8 @@ export function TopBar({
   exporting: boolean;
   aiOpen: boolean;
   onToggleAi: () => void;
+  graphOpen: boolean;
+  onToggleGraph: () => void;
   notice?: { tone: "info" | "warn"; text: string; busy?: boolean; title?: string } | null;
 }) {
   // null = not editing; show the committed title.
@@ -108,6 +112,17 @@ export function TopBar({
         </span>
       )}
       <SaveIndicator status={status} onRetry={onRetrySave} />
+      <Tip label={graphOpen ? "Hide graph" : "Open graph"}>
+        <button
+          onClick={onToggleGraph}
+          aria-pressed={graphOpen}
+          data-testid="toggle-graph"
+          className={cn("flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm", graphOpen ? "border-accent bg-accent-soft text-accent" : "border-line bg-white hover:bg-surface")}
+        >
+          <BarChart3 size={15} />
+          <span className="hidden sm:inline">Graph</span>
+        </button>
+      </Tip>
       <Tip label={aiOpen ? "Hide AI tutor" : "Open AI tutor"}>
         <button
           onClick={onToggleAi}
