@@ -1,0 +1,248 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum PageType {
+  BLANK
+  RULED
+  GRID
+  PDF
+}
+
+enum ObjectType {
+  INK
+  TEXT
+  EQUATION
+  SHAPE
+  IMAGE
+  GRAPH
+  AI_SOLUTION
+  SELECTION
+}
+
+enum ObjectSource {
+  USER
+  AI
+}
+
+enum ProcessingStatus {
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  INCORRECT
+  UNCERTAIN
+  UNSUPPORTED
+}
+
+model User {
+  id            String         @id @default(cuid())
+  /// Null for guest accounts; set once real authentication is attached.
+  email         String?        @unique
+  displayName   String?
+  isGuest       Boolean        @default(true)
+  profile       Json           @default("{}")
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  folders       Folder[]
+  notebooks     Notebook[]
+  documents     Document[]
+  conversations Conversation[]
+}
+
+/// A subject / folder used to organise notebooks in the library.
+model Folder {
+  id        String     @id @default(cuid())
+  ownerId   String
+  owner     User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name      String
+  color     String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  notebooks Notebook[]
+
+  @@index([ownerId])
+}
+
+model Notebook {
+  id            String         @id @default(cuid())
+  ownerId       String
+  owner         User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  folderId      String?
+  folder        Folder?        @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  title         String
+  /// Default background for pages added to this notebook.
+  defaultPageType PageType     @default(RULED)
+  lastOpenedAt  DateTime       @default(now())
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  pages         Page[]
+  documents     Document[]
+  conversations Conversation[]
+
+  @@index([ownerId, lastOpenedAt])
+  @@index([folderId])
+}
+
+model Page {
+  id           String         @id @default(cuid())
+  notebookId   String
+  notebook     Notebook       @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+  /// 0-based order within the notebook. Re-indexed inside a transaction on reorder/delete.
+  position     Int
+  pageType     PageType       @default(BLANK)
+  /// Page size in page units (CSS px for blank pages, PDF points for PDF pages).
+  width        Float          @default(816)
+  height       Float          @default(1056)
+  documentId   String?
+  document     Document?      @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  /// 1-based page number inside the source PDF when pageType = PDF.
+  pdfPageNumber Int?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  objects      PageObject[]
+  conversations Conversation[]
+  attempts     MathAttempt[]
+
+  @@index([notebookId, position])
+  @@index([documentId, pdfPageNumber])
+}
+
+/// A single notebook object (ink stroke, text, equation, graph, ...).
+/// `data` is a library-independent JSON payload validated per-type by Zod.
+/// Geometry is stored in page units (not normalised) alongside the page size on Page,
+/// so normalised coordinates are x / page.width, y / page.height.
+model PageObject {
+  id         String       @id
+  pageId     String
+  page       Page         @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  type       ObjectType
+  source     ObjectSource @default(USER)
+  x          Float
+  y          Float
+  width      Float
+  height     Float
+  rotation   Float        @default(0)
+  zIndex     Int          @default(0)
+  data       Json
+  metadata   Json?
+  /// e.g. a graph linked to its equation, or an AI solution linked to the source selection.
+  linkedToId String?
+  linkedTo   PageObject?  @relation("ObjectLinks", fields: [linkedToId], references: [id], onDelete: SetNull)
+  linkedFrom PageObject[] @relation("ObjectLinks")
+  /// Soft delete keeps student work recoverable.
+  deletedAt  DateTime?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@index([pageId, deletedAt])
+  @@index([linkedToId])
+}
+
+model Document {
+  id            String           @id @default(cuid())
+  ownerId       String
+  owner         User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  notebookId    String?
+  notebook      Notebook?        @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+  originalName  String
+  storageKey    String           @unique
+  mimeType      String
+  sizeBytes     Int
+  sha256        String
+  pageCount     Int              @default(0)
+  status        ProcessingStatus @default(UPLOADED)
+  statusMessage String?
+  /// PDF info dictionary, whether text was found, etc.
+  metadata      Json             @default("{}")
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  pages         Page[]
+  texts         DocumentPageText[]
+
+  @@index([ownerId])
+  @@index([notebookId])
+}
+
+/// Cached per-page text extraction so the agent never re-parses the PDF per question.
+model DocumentPageText {
+  id          String   @id @default(cuid())
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  pageNumber  Int
+  text        String
+  /// Text items with normalised bounding boxes: [{ t, x, y, w, h }]
+  items       Json     @default("[]")
+  /// "pdf-text" | "ocr" | "none"
+  source      String   @default("pdf-text")
+  createdAt   DateTime @default(now())
+
+  @@unique([documentId, pageNumber])
+}
+
+model Conversation {
+  id         String    @id @default(cuid())
+  notebookId String
+  notebook   Notebook  @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+  pageId     String?
+  page       Page?     @relation(fields: [pageId], references: [id], onDelete: SetNull)
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  messages   Message[]
+
+  @@index([notebookId, updatedAt])
+  @@index([userId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           MessageRole
+  content        String
+  /// Validated structured answer (steps, final answer, verification) for assistant messages.
+  structured     Json?
+  /// The context envelope that was sent (ids, region, intent) - never the full document text.
+  contextMeta    Json?
+  provider       String?
+  model          String?
+  promptTokens   Int?
+  completionTokens Int?
+  latencyMs      Int?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model MathAttempt {
+  id               String             @id @default(cuid())
+  pageId           String
+  page             Page               @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  questionRef      String?
+  recognizedLatex  String
+  confidence       Float?
+  verification     VerificationStatus @default(PENDING)
+  feedback         String?
+  details          Json?
+  createdAt        DateTime           @default(now())
+
+  @@index([pageId, createdAt])
+}

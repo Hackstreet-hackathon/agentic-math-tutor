@@ -1,0 +1,12 @@
+node_modules
+.next
+.env
+.env.local
+storage-data
+*.tsbuildinfo
+next-env.d.ts
+test-results
+playwright-report
+src/generated
+public/pdfjs
+.stack
