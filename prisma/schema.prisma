@@ -246,3 +246,11 @@ model MathAttempt {
 
   @@index([pageId, createdAt])
 }
+
+/// File bytes (uploaded PDFs) when STORAGE_PROVIDER=db: lets a serverless deploy run with just Postgres.
+model StoredObject {
+  key         String   @id
+  contentType String
+  data        Bytes
+  createdAt   DateTime @default(now())
+}

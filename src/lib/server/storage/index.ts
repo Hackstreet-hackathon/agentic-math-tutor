@@ -1,4 +1,5 @@
 import { env } from "../env";
+import { DbStorage } from "./db";
 import { LocalStorage } from "./local";
 import { S3Storage } from "./s3";
 import type { ObjectStorage } from "./types";
@@ -23,6 +24,8 @@ export function storage(): ObjectStorage {
       accessKeyId: e.OBJECT_STORAGE_ACCESS_KEY,
       secretAccessKey: e.OBJECT_STORAGE_SECRET_KEY,
     });
+  } else if (e.STORAGE_PROVIDER === "db") {
+    instance = new DbStorage();
   } else {
     instance = new LocalStorage(e.LOCAL_STORAGE_DIR);
   }

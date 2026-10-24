@@ -10,3 +10,4 @@ playwright-report
 src/generated
 public/pdfjs
 .stack
+.vercel

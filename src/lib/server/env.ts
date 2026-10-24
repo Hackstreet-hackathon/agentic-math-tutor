@@ -7,7 +7,7 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
 
-  STORAGE_PROVIDER: z.enum(["local", "s3"]).default("local"),
+  STORAGE_PROVIDER: z.enum(["local", "s3", "db"]).default("local"),
   LOCAL_STORAGE_DIR: z.string().default("./storage-data"),
   OBJECT_STORAGE_ENDPOINT: optionalString,
   OBJECT_STORAGE_REGION: z.string().default("auto"),
