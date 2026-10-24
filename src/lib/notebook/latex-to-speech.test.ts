@@ -70,7 +70,7 @@ describe("latexToSpeech", () => {
   });
 
   it("removes braces and dollar signs", () => {
-    expect(latexToSpeech("$x + {y}$")).toBe("x + y");
+    expect(latexToSpeech("$x + {y}$")).toBe("x plus y");
   });
 
   it("collapses multiple spaces", () => {
@@ -106,7 +106,7 @@ describe("stepsToSpeech", () => {
 
   it("handles only final answer", () => {
     const result = stepsToSpeech([], "x = 5");
-    expect(result).toBe("The final answer is x = 5.");
+    expect(result).toBe("The final answer is x equals 5.");
   });
 
   it("handles steps with no latex", () => {
@@ -129,7 +129,7 @@ describe("calculus and matrices", () => {
     expect(latexToSpeech("A^T")).toBe("A transpose");
     expect(latexToSpeech("A^{-1}")).toBe("A inverse");
     expect(latexToSpeech("\\det(A)")).toBe("determinant of (A)");
-    expect(latexToSpeech("x^{-1}")).toBe("x to the power of -1");
+    expect(latexToSpeech("x^{-1}")).toBe("x to the power of minus 1");
   });
 
   it("reads derivatives", () => {
@@ -140,7 +140,7 @@ describe("calculus and matrices", () => {
 
   it("reads integrals and limits", () => {
     expect(latexToSpeech("\\int_{0}^{1} x^2 dx")).toBe("the integral from 0 to 1 of x squared dx");
-    expect(latexToSpeech("\\int x dx + C")).toBe("the integral of x dx + C");
+    expect(latexToSpeech("\\int x dx + C")).toBe("the integral of x dx plus C");
     expect(latexToSpeech("\\lim_{x \\to 0} \\sin x")).toBe("the limit as x approaches 0 of sin x");
   });
 });

@@ -1,5 +1,5 @@
 "use client";
-import { AlertTriangle, ArrowUp, Check, FilePlus2, Headphones, Lightbulb, Loader2, MessageSquarePlus, PenLine, SearchCheck, Sparkles, Square, Wand2, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Check, FilePlus2, Headphones, Lightbulb, Loader2, MessageSquarePlus, Volume2, PenLine, SearchCheck, Sparkles, Square, Wand2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Answer, Intent, Verification } from "@/lib/ai/answer";
 import type { ChatRequest, ContextSummary } from "@/lib/ai/request";
@@ -20,7 +20,7 @@ import { VoiceOutput } from "./voice-output";
 
 type Item =
   | { id: string; role: "user"; text: string; context?: ContextSummary }
-  | { id: string; role: "assistant"; answer: Answer; verification?: Verification; malformed?: boolean; pending?: boolean; sourceQuestion: string; region: Rect | null; messageId?: string }
+  | { id: string; role: "assistant"; answer: Answer; verification?: Verification; malformed?: boolean; pending?: boolean; sourceQuestion: string; region: Rect | null; messageId?: string; /** Spoken in the voice conversation: shown as a plain chat bubble. */ voice?: boolean }
   | { id: string; role: "error"; text: string; retry?: { text: string; intent?: Intent }; retryAfterSec?: number };
 
 export interface InsertRequest {
@@ -65,7 +65,9 @@ export function AiPanel(props: {
   onFlushSave: () => Promise<void>;
   focusSignal: number;
   /** A question the workspace wants asked right away (e.g. "Show me" on a flagged step). */
-  autoAsk?: { nonce: number; text: string; intent?: Intent; /** The student circled something: the tutor takes the lead and asks about it. */ lasso?: boolean } | null;
+  autoAsk?: { nonce: number; text: string; intent?: Intent } | null;
+  /** The step-checker flagged a mistake / saw it fixed: the tutor raises it in the voice conversation. */
+  studyEvent?: { nonce: number; kind: "mistake" | "fixed"; step: string; hint?: string; whatsWrong?: string } | null;
   onClose: () => void;
 }) {
   const { notebookId, page, editor, textSelection } = props;
@@ -99,7 +101,7 @@ export function AiPanel(props: {
             }
             // Spoken (voice conversation) replies have no structured answer: show them as plain text.
             if (m.role === "ASSISTANT") {
-              return [{ id: m.id, role: "assistant", answer: { ...emptyAnswer("followup"), summary: m.content }, sourceQuestion: "", region: null, messageId: m.id }];
+              return [{ id: m.id, role: "assistant", voice: true, answer: { ...emptyAnswer("followup"), summary: m.content }, sourceQuestion: "", region: null, messageId: m.id }];
             }
             return [];
           }),
@@ -157,12 +159,39 @@ export function AiPanel(props: {
   }, [editor.region, editor.selectedIds, hasSelection, page, status, textSelection]);
 
   /* ----- voice conversation ----- */
-  const [convoOn, setConvoOn] = useState(false);
+  // Talking is on by default; turning it off is remembered for next time.
+  const [convoOn, setConvoOn] = useState(() => {
+    try {
+      return localStorage.getItem("mn-talk") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  const saveTalkPref = (on: boolean) => {
+    try {
+      localStorage.setItem("mn-talk", on ? "1" : "0");
+    } catch {
+      /* preference only */
+    }
+  };
   const [convoError, setConvoError] = useState<string | null>(null);
   const [sayText, setSayText] = useState("");
   const tutorItemId = useRef<string | null>(null);
+  // Browsers only play sound after the page has been clicked. If it was opened or reloaded without a click,
+  // wait for one (showing a clear button) instead of starting a conversation nobody can hear.
+  const [gesture, setGesture] = useState(() => (typeof navigator === "undefined" ? true : ((navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation?.hasBeenActive ?? true)));
+  useEffect(() => {
+    if (gesture) return;
+    const ok = () => setGesture(true);
+    window.addEventListener("pointerdown", ok, { once: true });
+    window.addEventListener("keydown", ok, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", ok);
+      window.removeEventListener("keydown", ok);
+    };
+  }, [gesture]);
   const convo = useConversation({
-    active: convoOn && Boolean(status?.configured),
+    active: convoOn && gesture && Boolean(status?.configured),
     notebookId,
     pageId: page.id,
     conversationId,
@@ -178,11 +207,12 @@ export function AiPanel(props: {
     onTutorStart: () => {
       const id = nextId();
       tutorItemId.current = id;
-      setItems((prev) => [...prev, { id, role: "assistant", pending: true, answer: emptyAnswer("followup"), sourceQuestion: "", region: editor.region?.bounds ?? null }]);
+      setItems((prev) => [...prev, { id, role: "assistant", voice: true, pending: true, answer: emptyAnswer("followup"), sourceQuestion: "", region: editor.region?.bounds ?? null }]);
     },
     onTutorText: (text) => setItems((prev) => prev.map((it) => (it.id === tutorItemId.current && it.role === "assistant" ? { ...it, answer: { ...it.answer, summary: text } } : it))),
     onTutorDone: () => setItems((prev) => prev.map((it) => (it.id === tutorItemId.current && it.role === "assistant" ? { ...it, pending: false } : it))),
     onError: (message) => setConvoError(message),
+    onNotice: setConvoError,
     onStopListening: () => setConvoOn(false),
   });
 
@@ -289,6 +319,15 @@ export function AiPanel(props: {
     [status, editor.region, editor.selectedIds, hasSelection, page, notebookId, conversationId, textSelection, props.onFlushSave],
   );
 
+  const lastStudyEvent = useRef(0);
+  const studyEvent = props.studyEvent;
+  useEffect(() => {
+    if (!studyEvent || studyEvent.nonce === lastStudyEvent.current) return;
+    lastStudyEvent.current = studyEvent.nonce;
+    if (convoOn && convo.state !== "off") convo.announce(studyEvent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studyEvent]);
+
   const lastAutoAsk = useRef(0);
   const autoAsk = props.autoAsk;
   useEffect(() => {
@@ -296,8 +335,7 @@ export function AiPanel(props: {
     lastAutoAsk.current = autoAsk.nonce;
     // Deferred so the request starts after this render has committed (the panel may have just mounted).
     setTimeout(() => {
-      if (autoAsk.lasso) convo.lasso();
-      else void send(autoAsk.text, autoAsk.intent);
+      void send(autoAsk.text, autoAsk.intent);
     }, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoAsk, status?.configured]);
@@ -329,7 +367,8 @@ export function AiPanel(props: {
             title={convoOn ? "Stop voice conversation" : "Talk with the tutor (always listening)"}
             onClick={() => {
               setConvoError(null);
-              setConvoOn((v) => !v);
+              saveTalkPref(!convoOn);
+              setConvoOn(!convoOn);
             }}
             className={cn("flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium", convoOn ? "bg-accent text-white" : "hover:bg-black/5")}
           >
@@ -372,6 +411,7 @@ export function AiPanel(props: {
               pageCount={props.pageCount}
               onGoToPage={props.onGoToPageNumber}
               onFollowUp={(q) => void send(q, "followup")}
+              onReplay={convoOn && gesture ? (text) => convo.replay(text) : undefined}
               onInsert={async () => {
                 if (!it.messageId) return false;
                 return props.onInsertSolution({ answer: it.answer, verification: it.verification ?? { status: "UNSUPPORTED" }, messageId: it.messageId, sourceQuestion: it.sourceQuestion, region: it.region });
@@ -410,7 +450,17 @@ export function AiPanel(props: {
             </button>
           ))}
         </div>
-        {convoOn && (
+        {convoOn && status?.configured && !gesture && (
+          <button
+            type="button"
+            data-testid="convo-start"
+            onClick={() => setGesture(true)}
+            className="mb-2 flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-3 py-2.5 text-sm font-medium text-white hover:bg-accent/90"
+          >
+            <Volume2 size={16} /> Tap to start talking with your tutor
+          </button>
+        )}
+        {convoOn && gesture && (
           <div data-testid="convo-bar" className="mb-2 rounded-xl bg-accent-soft px-3 py-2 text-xs text-accent">
             <div className="flex items-center gap-2">
               <span data-testid="convo-state" className="font-medium">
@@ -545,12 +595,14 @@ function AnswerCard({
   pageCount,
   onGoToPage,
   onFollowUp,
+  onReplay,
   onInsert,
 }: {
   item: Extract<Item, { role: "assistant" }>;
   pageCount: number;
   onGoToPage: (n: number) => void;
   onFollowUp: (q: string) => void;
+  onReplay?: (text: string) => void;
   onInsert: () => Promise<boolean>;
 }) {
   const { answer: a, pending } = item;
@@ -558,6 +610,24 @@ function AnswerCard({
   const canInsert = !pending && (a.steps.some((s) => s.latex) || a.finalAnswer);
   const verified = item.verification?.status === "VERIFIED";
   const empty = !a.summary && a.steps.length === 0 && !a.finalAnswer && !a.hint && !a.mistake && !a.needsClarification;
+
+  if (item.voice) {
+    // A spoken turn: a plain chat bubble with a "hear again" button, no answer-card chrome.
+    return (
+      <article data-testid="ai-answer" aria-busy={pending} className="rounded-2xl rounded-bl-md border border-line bg-surface px-3 py-2.5 text-sm">
+        {pending && !a.summary ? (
+          <p className="flex items-center gap-2 text-muted"><Loader2 size={14} className="animate-spin" /> Thinking…</p>
+        ) : (
+          <p className="leading-relaxed"><MathText text={a.summary} /></p>
+        )}
+        {!pending && a.summary && onReplay && (
+          <button type="button" aria-label="Hear this again" title="Hear this again" onClick={() => onReplay(a.summary)} className="mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-muted hover:bg-black/5 hover:text-ink">
+            <Volume2 size={12} /> Hear again
+          </button>
+        )}
+      </article>
+    );
+  }
 
   return (
     <article data-testid="ai-answer" aria-busy={pending} className="rounded-2xl rounded-bl-md border border-line bg-surface p-3 text-sm">

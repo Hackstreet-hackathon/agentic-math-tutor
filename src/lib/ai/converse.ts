@@ -21,9 +21,20 @@ export const converseRequestSchema = chatRequestSchema
     opening: z.boolean().optional(),
     /** True when the student has just circled something and the tutor takes the lead. */
     lasso: z.boolean().optional(),
+    /** The step-checker noticed something while the student studies; the tutor raises it in the conversation. */
+    event: z
+      .object({
+        kind: z.enum(["mistake", "fixed"]),
+        /** The student's written step, as read by the checker. */
+        step: z.string().max(400),
+        /** A non-spoilery pointer at what to re-check. */
+        hint: z.string().max(600).optional(),
+        whatsWrong: z.string().max(600).optional(),
+      })
+      .optional(),
     tutorState: tutorStateSchema.nullish(),
   })
-  .refine((b) => b.opening || b.lasso || Boolean(b.transcript), { message: "Say something first", path: ["transcript"] });
+  .refine((b) => b.opening || b.lasso || Boolean(b.event) || Boolean(b.transcript), { message: "Say something first", path: ["transcript"] });
 export type ConverseRequest = z.infer<typeof converseRequestSchema>;
 
 export const triageSchema = z.object({
@@ -46,7 +57,7 @@ export const TRIAGE_JSON_SCHEMA = {
 } as const;
 
 export type ConverseEvent =
-  | { event: "meta"; data: { conversationId: string; kind: Triage["kind"] | "opening" | "lasso"; model: string } }
+  | { event: "meta"; data: { conversationId: string; kind: Triage["kind"] | "opening" | "lasso" | "event"; model: string } }
   | { event: "control"; data: { control: NonNullable<Triage["control"]> } }
   /** A short filler to speak immediately while the real answer is being prepared. */
   | { event: "ack"; data: { text: string } }

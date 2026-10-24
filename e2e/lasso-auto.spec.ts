@@ -1,28 +1,19 @@
 import { expect, test } from "@playwright/test";
 import { createNotebook } from "./helpers";
 
-const sse = (events: [string, unknown][]) => events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join("");
-
-test("circling something with the lasso makes the tutor take the lead and ask about it, even with the panel closed", async ({ page }) => {
-  const asked: { lasso?: boolean; transcript?: string; selection: { region: unknown; objectIds: string[] } | null }[] = [];
+// Conversation-first: circling something is context for what you say next, not a trigger that makes the tutor talk.
+test("circling with the lasso does not make the tutor reply on its own", async ({ page }) => {
+  const asked: unknown[] = [];
   await page.route("**/api/ai/converse", async (route) => {
     asked.push(route.request().postDataJSON());
-    await route.fulfill({
-      status: 200,
-      headers: { "Content-Type": "text/event-stream" },
-      body: sse([
-        ["meta", { conversationId: "c1", kind: "lasso", model: "gpt-4o" }],
-        ["sentence", { text: "I see you circled the equation x squared plus five x plus six equals zero." }],
-        ["sentence", { text: "What would you like to do with it?" }],
-        ["state", { tutorState: { goal: "quadratic", stage: "check", attempts: 0 } }],
-        ["done", { messageId: "m1", text: "x", latencyMs: 5 }],
-      ]),
-    });
+    await route.abort();
+  });
+  await page.route("**/api/ai/chat", async (route) => {
+    asked.push(route.request().postDataJSON());
+    await route.abort();
   });
 
-  await createNotebook(page, "Lasso");
-  await expect(page.getByTestId("ai-panel")).toHaveCount(0); // panel closed
-
+  await createNotebook(page, "Lasso quiet");
   await page.getByTestId("tool-equation").click();
   const il = (await page.getByTestId("interaction-layer").boundingBox())!;
   await page.mouse.click(il.x + 200, il.y + 180);
@@ -40,11 +31,8 @@ test("circling something with the lasso makes the tutor take the lead and ask ab
   }
   await page.mouse.up();
 
-  await expect(page.getByTestId("ai-panel")).toBeVisible({ timeout: 10_000 });
-  await expect.poll(() => asked.length, { timeout: 15_000 }).toBe(1);
-  expect(asked[0]!.lasso).toBe(true);
-  expect(asked[0]!.transcript).toBeUndefined();
-  expect(asked[0]!.selection?.objectIds).toHaveLength(1);
-  expect(asked[0]!.selection?.region).toBeTruthy();
-  await expect(page.getByText("What would you like to do with it?")).toBeVisible();
+  await expect(page.getByTestId("selection-region")).toBeVisible();
+  await page.waitForTimeout(1500);
+  expect(asked).toHaveLength(0);
+  await expect(page.getByTestId("ai-panel")).toHaveCount(0);
 });

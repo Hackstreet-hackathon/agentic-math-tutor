@@ -2,6 +2,7 @@
 import { Eye, EyeOff, Lightbulb, Loader2, Volume2, VolumeX } from "lucide-react";
 import { useState } from "react";
 import { speak } from "@/lib/client/speak";
+import { isConversationActive } from "@/lib/client/speech-state";
 import { cn } from "@/lib/utils";
 import type { FlagView, WatchState } from "./use-work-watcher";
 
@@ -61,7 +62,9 @@ export function FlagOverlay({
   onFix: () => void;
   onNotAMistake: () => void;
 }) {
-  const [open, setOpen] = useState(true);
+  // In a voice conversation the tutor raises the mistake itself, so the card starts collapsed and never covers
+  // the line the student writes next; tap the "!" to open it. Without a conversation it opens straight away.
+  const [open, setOpen] = useState(() => !isConversationActive());
   const [hint, setHint] = useState(false);
   const r = flag.rect;
   const left = Math.max(0, r.x - 4) * zoom;

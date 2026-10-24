@@ -82,7 +82,25 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
     stateRef.current = state;
   });
   const [exporting, setExporting] = useState(false);
-  const [aiOpen, setAiOpen] = useState(false);
+  // The tutor is open (and talking) by default on screens wide enough to fit it beside the page;
+  // closing or opening it yourself is remembered.
+  const [aiOpen, setAiOpen] = useState(() => {
+    try {
+      const saved = localStorage.getItem("mn-ai");
+      if (saved === "0" || saved === "1") return saved === "1";
+    } catch {
+      /* storage unavailable */
+    }
+    return typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches;
+  });
+  const setAiOpenSaved = (open: boolean) => {
+    setAiOpen(open);
+    try {
+      localStorage.setItem("mn-ai", open ? "1" : "0");
+    } catch {
+      /* preference only */
+    }
+  };
   const [aiFocus, setAiFocus] = useState(0);
   const [graphOpen, setGraphOpen] = useState(false);
   const [textSelection, setTextSelection] = useState("");
@@ -91,12 +109,12 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
   const page = currentPage(state);
 
   // "Watch my work": live tracking of the student's steps. Preferences are per-browser conveniences.
-  const [watchOn, setWatchOn] = useState(false);
+  const [watchOn, setWatchOn] = useState(true);
   const [watchVoice, setWatchVoice] = useState(true);
   const [autoAsk, setAutoAsk] = useState<{ nonce: number; text: string; intent?: Intent; lasso?: boolean } | null>(null);
   useEffect(() => {
     try {
-      setWatchOn(localStorage.getItem("mn-watch") === "1"); // eslint-disable-line react-hooks/set-state-in-effect
+      setWatchOn(localStorage.getItem("mn-watch") !== "0"); // eslint-disable-line react-hooks/set-state-in-effect
       setWatchVoice(localStorage.getItem("mn-watch-voice") !== "0");
     } catch {
       /* storage unavailable: keep defaults */
@@ -109,20 +127,10 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
       /* ignore */
     }
   };
-  // Circling something with the lasso makes the tutor take the lead and ask about it, even if the panel was closed.
-  const lastLasso = useRef<unknown>(null);
-  useEffect(() => {
-    const r = editor.region;
-    if (!r || r.kind !== "lasso" || r === lastLasso.current) return;
-    lastLasso.current = r;
-    const t = setTimeout(() => {
-      setAiOpen(true);
-      setAutoAsk({ nonce: Date.now(), lasso: true, text: "" });
-    }, 350);
-    return () => clearTimeout(t);
-  }, [editor.region]);
-
-  const watcher = useWorkWatcher({ enabled: watchOn, voice: watchVoice, notebookId: notebook.id, page });
+  // Mistakes and fixes noticed by the step-checker are raised by the tutor inside the voice conversation.
+  const [studyEvent, setStudyEvent] = useState<{ nonce: number; kind: "mistake" | "fixed"; step: string; hint?: string; whatsWrong?: string } | null>(null);
+  const onStudyEvent = useCallback((e: { kind: "mistake" | "fixed"; step: string; hint?: string; whatsWrong?: string }) => setStudyEvent({ nonce: Date.now(), ...e }), []);
+  const watcher = useWorkWatcher({ enabled: watchOn, voice: watchVoice, notebookId: notebook.id, page, onEvent: onStudyEvent });
 
   // Poll text-extraction status while any document is still processing; the notebook stays usable meanwhile.
   const pendingIds = Object.values(docs).filter((d) => d.status === "UPLOADED" || d.status === "PROCESSING").map((d) => d.id).join(",");
@@ -444,7 +452,7 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
         onExport={exportPdf}
         exporting={exporting}
         aiOpen={aiOpen}
-        onToggleAi={() => setAiOpen((o) => !o)}
+        onToggleAi={() => setAiOpenSaved(!aiOpen)}
         graphOpen={graphOpen}
         onToggleGraph={() => setGraphOpen((o) => !o)}
         watch={
@@ -551,7 +559,8 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
             onFlushSave={flush}
             focusSignal={aiFocus}
             autoAsk={autoAsk}
-            onClose={() => setAiOpen(false)}
+            studyEvent={studyEvent}
+            onClose={() => setAiOpenSaved(false)}
           />
         )}
       </div>

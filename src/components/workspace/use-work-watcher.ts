@@ -5,6 +5,7 @@ import { ChatError, getAiStatus, watchWork } from "@/lib/client/ai";
 import type { PageDto } from "@/lib/client/api";
 import { captureRegionImage } from "@/lib/client/region-image";
 import { speak, isSpeaking } from "@/lib/client/speak";
+import { isConversationActive } from "@/lib/client/speech-state";
 import { unionRects, boundsOf, type Rect } from "@/lib/notebook/geometry";
 import type { NotebookObject } from "@/lib/notebook/schemas";
 
@@ -72,8 +73,16 @@ const key = (pageId: string, latex: string) => `${pageId}::${latex.replace(/\s+/
  * Watches the current page. Once the student stops writing for a moment, the work is checked and the first
  * wrong step (if any) is returned as a flag. Does nothing while disabled.
  */
-export function useWorkWatcher(opts: { enabled: boolean; voice: boolean; notebookId: string; page: PageDto | undefined }) {
+export type WatchEvent = { kind: "mistake" | "fixed"; step: string; hint?: string; whatsWrong?: string };
+
+export function useWorkWatcher(opts: { enabled: boolean; voice: boolean; notebookId: string; page: PageDto | undefined; onEvent?: (e: WatchEvent) => void }) {
   const { enabled, voice, notebookId, page } = opts;
+  // While the voice conversation is on, mistakes and fixes are raised inside it (so they are spoken once, in order,
+  // and appear in the transcript); otherwise the checker speaks a short hint on its own.
+  const eventRef = useRef(opts.onEvent);
+  useEffect(() => {
+    eventRef.current = opts.onEvent;
+  });
   const [state, setState] = useState<WatchState>("off");
   const [flag, setFlag] = useState<{ pageId: string; flag: FlagView } | null>(null);
   const [vision, setVision] = useState<boolean | null>(null);
@@ -91,6 +100,13 @@ export function useWorkWatcher(opts: { enabled: boolean; voice: boolean; noteboo
     voiceRef.current = voice;
   });
   const maybeSpeak = (f: WatchFlag, pid: string) => {
+    if (isConversationActive()) {
+      const k = key(pid, f.latex);
+      if (spoken.current.keys.has(k)) return;
+      spoken.current.keys.add(k);
+      eventRef.current?.({ kind: "mistake", step: f.latex, hint: f.nudge, whatsWrong: f.whatsWrong });
+      return;
+    }
     const k = key(pid, f.latex);
     const s = spoken.current;
     if (!voiceRef.current || !f.voiceLine || s.keys.has(k) || Date.now() - s.at < VOICE_COOLDOWN_MS || isSpeaking()) return;
@@ -178,7 +194,9 @@ export function useWorkWatcher(opts: { enabled: boolean; voice: boolean; noteboo
           // The student fixed the step they were nudged about: say so.
           if (r.status === "ok" && awaiting.current?.pageId === pageId) {
             awaiting.current = null;
-            if (voiceRef.current) {
+            if (isConversationActive()) {
+              eventRef.current?.({ kind: "fixed", step: "" });
+            } else if (voiceRef.current) {
               spoken.current.at = Date.now();
               void speak(PRAISE[Math.floor(Math.random() * PRAISE.length)]!);
             }

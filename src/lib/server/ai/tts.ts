@@ -1,6 +1,7 @@
 import { env } from "../env";
+import { HttpError } from "../http";
 
-/** Returns a Response streaming audio/mpeg, or null when TTS is not configured. */
+/** Returns a Response streaming audio/mpeg, or null when TTS is not configured. Throws a 502 when the provider fails. */
 export async function synthesizeSpeech(
   text: string,
   signal?: AbortSignal,
@@ -24,13 +25,14 @@ export async function synthesizeSpeech(
           // Only the gpt-4o-*-tts models accept speaking-style instructions.
           ...(env().OPENAI_TTS_STYLE && /gpt-4o/.test(env().OPENAI_TTS_MODEL ?? "") ? { instructions: env().OPENAI_TTS_STYLE } : {}),
         }),
-        signal,
+        signal: signal ?? AbortSignal.timeout(20_000),
       });
 
-      if (!res.ok) return null;
+      if (!res.ok) throw new HttpError(502, `The voice service failed (${res.status}).`, "tts_failed");
       return res;
-    } catch {
-      return null;
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      throw new HttpError(502, "The voice service could not be reached.", "tts_unreachable");
     }
   }
 

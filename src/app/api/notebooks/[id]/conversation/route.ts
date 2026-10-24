@@ -15,7 +15,7 @@ export const GET = route<{ id: string }>(async (_req, { params }) => {
       id: true,
       messages: {
         orderBy: { createdAt: "desc" },
-        take: 60,
+        take: 400,
         select: { id: true, role: true, content: true, structured: true, contextMeta: true, createdAt: true },
       },
     },

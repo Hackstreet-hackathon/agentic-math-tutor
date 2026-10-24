@@ -2,10 +2,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IDLE_STATE, isPhantomTranscript, type ConverseRequest, type TutorState } from "@/lib/ai/converse";
 import { ChatError, streamConverse } from "@/lib/client/ai";
+import { isEcho } from "@/lib/client/echo";
 import { SpeechQueue } from "@/lib/client/speech-queue";
+import { setConversationActive } from "@/lib/client/speech-state";
+import { looksUnfinished } from "@/lib/client/utterance";
+import { Vad, type VadState } from "@/lib/client/vad";
 import { encodeWav } from "@/lib/client/wav";
 
 export type ConvoState = "off" | "listening" | "hearing" | "transcribing" | "thinking" | "speaking";
+
+/** Something the step-checker noticed while the student works; the tutor raises it in the conversation. */
+export interface StudyEvent {
+  kind: "mistake" | "fixed";
+  step: string;
+  hint?: string;
+  whatsWrong?: string;
+}
 
 export interface TurnPayload {
   selection: ConverseRequest["selection"];
@@ -28,6 +40,8 @@ interface Options {
   onError: (message: string) => void;
   /** The student said "stop listening". */
   onStopListening: () => void;
+  /** Non-error hint for the user (e.g. "click once to allow audio"); null clears it. */
+  onNotice?: (message: string | null) => void;
 }
 
 /** Keep only the first `keep` samples (drops the silence that ended the turn, so less audio is uploaded). */
@@ -42,13 +56,11 @@ function trimTail(chunks: Float32Array[], keep: number): Float32Array[] {
   return out;
 }
 
-const END_SILENCE_MS = 900;
-const MIN_SPEECH_MS = 500;
-const BARGE_WINDOW = 6; // ticks
-const BARGE_VOTES = 3;
 const PRE_ROLL_MS = 700;
 const MAX_UTTERANCE_S = 30;
 const TICK_MS = 80;
+/** How long to wait for the rest of a sentence that trails off ("How do I…") before answering what we have. */
+const HOLD_MS = 1600;
 
 /**
  * Always-listening voice conversation. Mic -> voice-activity detection -> Whisper (/api/ai/stt) ->
@@ -63,14 +75,28 @@ export function useConversation(opts: Options) {
 
   const [state, setStateRaw] = useState<ConvoState>("off");
   const stateRef = useRef<ConvoState>("off");
+  /** A mistake/fix the checker noticed while the student was talking or the tutor was mid-answer. */
+  const waitingEvent = useRef<StudyEvent | null>(null);
+  const runEvent = useRef<(e: StudyEvent) => void>(() => {});
   const setState = useCallback((s: ConvoState) => {
     stateRef.current = s;
     setStateRaw(s);
+    if (s === "listening" && waitingEvent.current) {
+      const e = waitingEvent.current;
+      waitingEvent.current = null;
+      // Let the "listening" state settle first so it never cuts into something that just started.
+      setTimeout(() => runEvent.current(e), 400);
+    }
   }, []);
 
   const queue = useRef<SpeechQueue | null>(null);
   const abort = useRef<AbortController | null>(null);
   const tutorState = useRef<TutorState>(IDLE_STATE);
+  /** What the tutor said recently, to recognise (and ignore) its own voice coming back through the mic. */
+  const tutorSaid = useRef<string[]>([]);
+  /** All the "is the student talking?" decisions (noise floor, echo, interruptions); unit-tested on its own. */
+  const vad = useRef(new Vad());
+  const sttAbort = useRef<AbortController | null>(null);
   const conversationId = useRef<string | null>(opts.conversationId);
   useEffect(() => {
     conversationId.current = opts.conversationId;
@@ -82,10 +108,13 @@ export function useConversation(opts: Options) {
    * while listening is on; otherwise the same turn runs as text in the panel.
    */
   const handleTranscript = useCallback(
-    async (transcript: string | null, mode?: "opening" | "lasso") => {
+    async (transcript: string | null, mode?: "opening" | "lasso" | "event", event?: StudyEvent) => {
       const cur = o.current;
       if (!cur.pageId) return;
-      queue.current ??= new SpeechQueue();
+      if (!queue.current) {
+        queue.current = new SpeechQueue();
+        queue.current.onItemStart = (first) => first && vad.current.tutorSentenceStarted(Date.now());
+      }
       const q = queue.current;
       const voiceOn = stateRef.current !== "off";
       const set = (s: ConvoState) => voiceOn && setState(s);
@@ -103,13 +132,13 @@ export function useConversation(opts: Options) {
         cur.onTutorStart();
       };
       try {
-        const payload = mode === "opening" ? null : await cur.getPayload();
+        const payload = mode === "opening" || mode === "event" ? null : await cur.getPayload();
         await streamConverse(
           {
             notebookId: cur.notebookId,
             pageId: cur.pageId,
             conversationId: conversationId.current,
-            ...(mode === "opening" ? { opening: true } : mode === "lasso" ? { lasso: true } : { transcript: transcript ?? "" }),
+            ...(mode === "opening" ? { opening: true } : mode === "lasso" ? { lasso: true } : mode === "event" ? { event } : { transcript: transcript ?? "" }),
             selection: payload?.selection ?? null,
             image: payload?.image ?? null,
             recognizedHandwriting: payload?.recognizedHandwriting,
@@ -121,11 +150,16 @@ export function useConversation(opts: Options) {
               cur.onConversationId(m.conversationId);
             },
             onAck: (t) => {
+              tutorSaid.current = [...tutorSaid.current, t].slice(-8);
+              begin();
+              text = t;
+              cur.onTutorText(text);
               if (!voiceOn) return;
               q.enqueue(t);
               set("speaking");
             },
             onSentence: (t) => {
+              tutorSaid.current = [...tutorSaid.current, t].slice(-8);
               begin();
               text += (text ? " " : "") + t;
               cur.onTutorText(text);
@@ -144,7 +178,11 @@ export function useConversation(opts: Options) {
           ac.signal,
         );
         if (started) cur.onTutorDone();
-        if (voiceOn) await q.whenIdle();
+        if (voiceOn) {
+          await q.whenIdle();
+          // Only when the tutor finished by itself; if the student cut it off, their speech must not be muted.
+          if (!ac.signal.aborted) vad.current.tutorStopped(Date.now());
+        }
       } catch (e) {
         if ((e as Error).name !== "AbortError") {
           q.cancel();
@@ -158,6 +196,34 @@ export function useConversation(opts: Options) {
     },
     [setState],
   );
+
+  /** The checker noticed a mistake / a fix: the tutor brings it up in the conversation (spoken and in the panel). */
+  const announce = useCallback(
+    (event: StudyEvent) => {
+      if (stateRef.current === "off") return;
+      // Never talk over the student or interrupt an answer: wait for a quiet moment (the newest event wins).
+      if (stateRef.current !== "listening") {
+        waitingEvent.current = event;
+        return;
+      }
+      void handleTranscript(null, "event", event);
+    },
+    [handleTranscript],
+  );
+  useEffect(() => {
+    runEvent.current = (e) => {
+      if (stateRef.current === "listening") void handleTranscript(null, "event", e);
+      else waitingEvent.current = e;
+    };
+  }, [handleTranscript]);
+
+  /** Say a message again (also the way to get sound after the browser blocked autoplay: it is a click). */
+  const replay = useCallback((text: string) => {
+    queue.current ??= new SpeechQueue();
+    queue.current.cancel();
+    queue.current.resetLog();
+    queue.current.enqueue(text);
+  }, []);
 
   /** The student circled something: the tutor takes the lead and asks about it (spoken when listening is on). */
   const lasso = useCallback(() => {
@@ -180,11 +246,42 @@ export function useConversation(opts: Options) {
 
   const greeted = useRef(false);
 
+  // The voice failed or isn't available: say so instead of staying silent.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const failed = (e: Event) => {
+      o.current.onNotice?.((e as CustomEvent<string>).detail);
+      clearTimeout(timer);
+      timer = setTimeout(() => o.current.onNotice?.(null), 8000);
+    };
+    window.addEventListener("mn-audio-failed", failed);
+    return () => {
+      window.removeEventListener("mn-audio-failed", failed);
+      clearTimeout(timer);
+    };
+  }, []);
+
+  // Sound the browser refused to play until the page gets a click.
+  useEffect(() => {
+    const blocked = () => {
+      o.current.onNotice?.("Click anywhere on the page once to allow sound.");
+      window.addEventListener("pointerdown", () => o.current.onNotice?.(null), { once: true });
+    };
+    window.addEventListener("mn-audio-blocked", blocked);
+    return () => window.removeEventListener("mn-audio-blocked", blocked);
+  }, []);
+
+  useEffect(() => {
+    setConversationActive(opts.active);
+    return () => setConversationActive(false);
+  }, [opts.active]);
+
   useEffect(() => {
     if (!opts.active) {
       greeted.current = false;
       queue.current?.cancel();
       abort.current?.abort();
+      sttAbort.current?.abort();
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setState("off");
       return;
@@ -193,7 +290,6 @@ export function useConversation(opts: Options) {
     let stopped = false;
     let stream: MediaStream | null = null;
     let ctx: AudioContext | null = null;
-    let analyser: AnalyserNode | null = null;
     let capture: AudioWorkletNode | null = null;
     let workletUrl: string | null = null;
     let tick: ReturnType<typeof setInterval> | null = null;
@@ -206,12 +302,23 @@ export function useConversation(opts: Options) {
     let utteranceSamples = 0;
     /** Samples captured up to the last moment of speech; everything after is the silence that ended the turn. */
     let speechEndSamples = 0;
-    let speechStart: number | null = null;
-    let lastSpeech = 0;
-    const votes: boolean[] = [];
-    let floor = 0.01;
+    /** The clip currently being transcribed, kept so a continuation after a thinking-pause can be merged into it. */
+    let pending: Float32Array[] | null = null;
+    vad.current = new Vad();
+    // `localStorage.setItem("mn-debug","1")` logs the detector's decisions to the console.
+    let debug = false;
+    try {
+      debug = localStorage.getItem("mn-debug") === "1";
+    } catch {
+      /* ignore */
+    }
 
+    // Loudness is measured over every sample since the last check (a short snapshot misses most of the audio).
+    let sumSq = 0;
+    let sampleCount = 0;
     const onAudio = (chunk: Float32Array) => {
+      for (let i = 0; i < chunk.length; i++) sumSq += chunk[i]! * chunk[i]!;
+      sampleCount += chunk.length;
       if (utterance) {
         utterance.push(chunk);
         utteranceSamples += chunk.length;
@@ -222,32 +329,47 @@ export function useConversation(opts: Options) {
       const keep = ((ctx?.sampleRate ?? 48000) * PRE_ROLL_MS) / 1000;
       while (ring.length > 1 && ringSamples - ring[0]!.length >= keep) ringSamples -= ring.shift()!.length;
     };
-    const beginUtterance = () => {
-      utterance = [...ring];
-      utteranceSamples = ringSamples;
-      speechEndSamples = ringSamples;
+    const beginUtterance = (carry: Float32Array[] = []) => {
+      utterance = [...carry, ...ring];
+      utteranceSamples = utterance.reduce((n, c) => n + c.length, 0);
+      speechEndSamples = utteranceSamples;
       ring.length = 0;
       ringSamples = 0;
     };
 
     const transcribe = async (blob: Blob) => {
       setState("transcribing");
+      const ac = new AbortController();
+      sttAbort.current = ac;
       try {
         const form = new FormData();
         form.append("audio", blob, "audio.wav");
-        const res = await fetch("/api/ai/stt", { method: "POST", body: form });
+        const res = await fetch("/api/ai/stt", { method: "POST", body: form, signal: ac.signal });
         if (res.status === 503) {
           o.current.onError("Speech recognition isn’t set up on the server (STT_PROVIDER).");
           o.current.onStopListening();
           return;
         }
         const transcript = res.ok ? (((await res.json()) as { transcript?: string }).transcript ?? "").trim() : "";
-        if (isPhantomTranscript(transcript)) {
+        // Silence/noise hallucinations, and the tutor's own voice coming back through the speakers.
+        if (isPhantomTranscript(transcript) || isEcho(transcript, tutorSaid.current)) {
+          pending = null;
           setState("listening");
           return;
         }
+        if (looksUnfinished(transcript)) {
+          // Probably mid-thought: give the rest a moment to arrive (it is merged if it does).
+          const waited = await new Promise<boolean>((resolve) => {
+            const t = setTimeout(() => resolve(true), HOLD_MS);
+            ac.signal.addEventListener("abort", () => (clearTimeout(t), resolve(false)), { once: true });
+          });
+          if (!waited) return;
+        }
+        pending = null;
         await handleTranscript(transcript);
-      } catch {
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return; // the student kept talking: that path owns the state
+        pending = null;
         setState("listening");
       }
     };
@@ -255,65 +377,69 @@ export function useConversation(opts: Options) {
     const endUtterance = () => {
       const chunks = utterance;
       utterance = null;
-      speechStart = null;
       if (!chunks || !ctx) return;
-      void transcribe(encodeWav(trimTail(chunks, speechEndSamples + ctx.sampleRate * 0.25), ctx.sampleRate));
+      const clip = trimTail(chunks, speechEndSamples + ctx.sampleRate * 0.25);
+      pending = clip;
+      void transcribe(encodeWav(clip, ctx.sampleRate));
     };
 
     const onTick = () => {
-      if (!analyser) return;
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      analyser.getByteTimeDomainData(data);
-      const rms = Math.sqrt(data.reduce((s, v) => s + ((v - 128) / 128) ** 2, 0) / data.length);
-      const now = Date.now();
+      if (sampleCount === 0 || stateRef.current === "off") return;
+      const rms = Math.sqrt(sumSq / sampleCount);
+      sumSq = 0;
+      sampleCount = 0;
       const s = stateRef.current;
 
-      // Track room noise while nobody is talking so the threshold adapts.
-      if (s === "listening" && rms < floor * 2.5) floor = floor * 0.95 + rms * 0.05;
-      const threshold = Math.max(0.022, floor * 3);
-
-      if (s === "thinking" || s === "transcribing") return;
-
-      if (s === "speaking") {
-        // Barge-in: speech has quiet gaps between syllables, so vote over a short window (3 of the last 6
-        // ticks clearly louder than room noise) instead of requiring unbroken volume. Echo cancellation keeps
-        // the tutor's own voice well below this level.
-        votes.push(rms > Math.max(0.05, threshold * 2));
-        if (votes.length > BARGE_WINDOW) votes.shift();
-        if (votes.filter(Boolean).length >= BARGE_VOTES) {
-          votes.length = 0;
+      const ev = vad.current.tick(rms, Date.now(), s as VadState);
+      if (debug) console.debug(`[vad] ${s} rms=${rms.toFixed(3)} thr=${vad.current.threshold.toFixed(3)} ${ev ?? ""}`);
+      switch (ev) {
+        case "barge_in": // the student talked over the tutor
           queue.current?.cancel();
           abort.current?.abort();
           beginUtterance();
-          speechStart = now - (BARGE_WINDOW * TICK_MS) / 2;
-          lastSpeech = now;
           setState("hearing");
+          break;
+        case "resume": {
+          // The student is talking again. While their clip is still being transcribed this is a continuation
+          // after a thinking-pause, so merge it; once the tutor is already working it is a new utterance.
+          const carry = s === "transcribing" && pending ? pending : [];
+          sttAbort.current?.abort();
+          abort.current?.abort();
+          queue.current?.cancel();
+          pending = null;
+          beginUtterance(carry);
+          setState("hearing");
+          break;
         }
-        return;
-      }
-      votes.length = 0;
-
-      if (rms > threshold) {
-        if (speechStart === null) {
-          speechStart = now;
+        case "start":
           beginUtterance();
-        }
-        lastSpeech = now;
-        speechEndSamples = utteranceSamples;
-        if (s !== "hearing") setState("hearing");
-      } else if (speechStart !== null) {
-        if (now - lastSpeech > END_SILENCE_MS) {
-          if (lastSpeech - speechStart >= MIN_SPEECH_MS) endUtterance();
-          else {
-            utterance = null;
-            speechStart = null;
-            setState("listening");
-          }
-        }
+          setState("hearing");
+          break;
+        case "speech":
+          speechEndSamples = utteranceSamples;
+          if (s !== "hearing") setState("hearing");
+          break;
+        case "end":
+          endUtterance();
+          break;
+        case "discard": // a cough or click
+          utterance = null;
+          setState("listening");
+          break;
       }
       // Very long monologue or a stuck noise source: send what we have.
-      if (utterance && utteranceSamples > (ctx?.sampleRate ?? 48000) * MAX_UTTERANCE_S) endUtterance();
+      if (utterance && utteranceSamples > (ctx?.sampleRate ?? 48000) * MAX_UTTERANCE_S) {
+        endUtterance();
+        vad.current.reset();
+      }
     };
+
+    // The tutor speaks first, right away: it does not wait for (or depend on) the microphone permission.
+    setState("listening");
+    if (!greeted.current) {
+      greeted.current = true;
+      void handleTranscript(null, "opening");
+    }
 
     (async () => {
       try {
@@ -324,10 +450,19 @@ export function useConversation(opts: Options) {
           return;
         }
         ctx = new AudioContext();
+        // Browsers may keep audio suspended until the page has seen a click; resume on the first one.
+        const resumeAudio = () => {
+          void ctx?.resume().then(() => {
+            if (ctx?.state === "running") o.current.onNotice?.(null);
+          });
+        };
+        if (ctx.state === "suspended") {
+          o.current.onNotice?.("Click anywhere on the page once so the tutor can listen and speak.");
+          window.addEventListener("pointerdown", resumeAudio, { once: true });
+          window.addEventListener("keydown", resumeAudio, { once: true });
+          resumeAudio();
+        }
         const source = ctx.createMediaStreamSource(stream);
-        analyser = ctx.createAnalyser();
-        analyser.fftSize = 512;
-        source.connect(analyser);
 
         const code = "class C extends AudioWorkletProcessor{process(i){const c=i[0][0];if(c)this.port.postMessage(c.slice(0));return true}}registerProcessor('mn-capture',C)";
         workletUrl = URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
@@ -340,13 +475,7 @@ export function useConversation(opts: Options) {
         source.connect(capture);
         capture.connect(mute).connect(ctx.destination);
 
-        setState("listening");
         tick = setInterval(onTick, TICK_MS);
-        // The tutor speaks first: asks what they're learning, or opens from the PDF / notes on the page.
-        if (!greeted.current) {
-          greeted.current = true;
-          void handleTranscript(null, "opening");
-        }
       } catch (e) {
         const name = (e as DOMException).name;
         o.current.onError(
@@ -358,7 +487,8 @@ export function useConversation(opts: Options) {
                 ? "No microphone found."
                 : "Could not start the microphone.",
         );
-        o.current.onStopListening();
+        // No microphone is not the end of the conversation: the tutor still talks, and you can type to it.
+        o.current.onNotice?.(null);
       }
     })();
 
@@ -371,8 +501,9 @@ export function useConversation(opts: Options) {
       if (workletUrl) URL.revokeObjectURL(workletUrl);
       queue.current?.cancel();
       abort.current?.abort();
+      sttAbort.current?.abort();
     };
   }, [opts.active, setState, handleTranscript]);
 
-  return { state, say, lasso, tutorState };
+  return { state, say, lasso, announce, replay, tutorState };
 }

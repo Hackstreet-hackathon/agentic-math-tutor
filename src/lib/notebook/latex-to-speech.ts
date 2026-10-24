@@ -28,7 +28,7 @@ export function latexToSpeech(latex: string): string {
   s = s.replace(/\\int(?![a-zA-Z])/g, "the integral of ");
   s = s.replace(/\\lim_\{([^}]*?)\s*\\(?:to|rightarrow)\s*([^}]*)\}/g, "the limit as $1 approaches $2 of ");
   s = s.replace(/\\(?:to|rightarrow)(?![a-zA-Z])/g, "approaches");
-  s = s.replace(/\\cdot(?![a-zA-Z])/g, "times");
+  s = s.replace(/\\cdot(?![a-zA-Z])/g, " times ");
   s = s.replace(/([a-zA-Z])'+/g, "$1 prime");
 
   // Fractions: \frac{a}{b} → "a over b"
@@ -58,8 +58,8 @@ export function latexToSpeech(latex: string): string {
   s = s.replace(/\\beta(?![a-zA-Z])/g, "beta");
 
   // Operators
-  s = s.replace(/\\times(?![a-zA-Z])/g, "times");
-  s = s.replace(/\\div(?![a-zA-Z])/g, "divided by");
+  s = s.replace(/\\times(?![a-zA-Z])/g, " times ");
+  s = s.replace(/\\div(?![a-zA-Z])/g, " divided by ");
   s = s.replace(/\\pm(?![a-zA-Z])/g, "plus or minus");
 
   // Comparisons
@@ -72,6 +72,14 @@ export function latexToSpeech(latex: string): string {
 
   // Trig / log functions — remove backslash
   s = s.replace(/\\(sin|cos|tan|ln|log)(?![a-zA-Z])/g, "$1");
+
+  // Operators: engines skip or mumble bare symbols
+  s = s.replace(/\s*=\s*/g, " equals ");
+  s = s.replace(/\s*\+\s*/g, " plus ");
+  s = s.replace(/(^|[\s(])-(?=\s*[0-9a-zA-Z(])/g, "$1minus ");
+  s = s.replace(/(?<=[0-9a-zA-Z)])\s*-\s*(?=[0-9a-zA-Z(])/g, " minus ");
+  s = s.replace(/\s*\*\s*/g, " times ");
+  s = s.replace(/\s*\/\s*/g, " over ");
 
   // Remove remaining \command patterns
   s = s.replace(/\\[a-zA-Z]+/g, "");

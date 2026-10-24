@@ -1,3 +1,4 @@
+import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { createNotebook } from "./helpers";
 
@@ -6,7 +7,7 @@ test.use({
   permissions: ["microphone"],
   launchOptions: {
     ...(process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {}),
-    args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
+    args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", `--use-file-for-fake-audio-capture=${path.resolve(__dirname, "fixtures", "silence.wav")}%noloop`],
   },
 });
 

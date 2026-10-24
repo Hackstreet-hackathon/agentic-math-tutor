@@ -18,13 +18,28 @@ interface Item {
   audio: Promise<Blob | null>;
 }
 
+const hasBrowserVoice = () => typeof window !== "undefined" && "speechSynthesis" in window && window.speechSynthesis.getVoices().length > 0;
+const reportAudioFailure = (why: string) => window.dispatchEvent(new CustomEvent("mn-audio-failed", { detail: why }));
+
+/** OpenAI TTS usually answers in 1-3 s but sometimes stalls or errors; never let one slow sentence freeze the tutor. */
 async function fetchTts(text: string): Promise<Blob | null> {
-  try {
-    const res = await fetch("/api/ai/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
-    return res.ok ? await res.blob() : null;
-  } catch {
-    return null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch("/api/ai/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }), signal: AbortSignal.timeout(9000) });
+      if (res.status === 503) {
+        if (!hasBrowserVoice()) reportAudioFailure("Voice isn’t set up on the server (TTS_PROVIDER) and this browser has no voice of its own.");
+        return null; // not configured: use the browser voice
+      }
+      if (res.ok) {
+        const blob = await res.blob();
+        if (blob.size > 0) return blob;
+      }
+    } catch {
+      /* timed out or network blip: try once more */
+    }
   }
+  if (!hasBrowserVoice()) reportAudioFailure("The voice service didn’t respond, so I’m showing my reply as text. Use the speaker button to try again.");
+  return null;
 }
 
 /** Plays sentences one after another, prefetching audio; can be cancelled instantly (barge-in). */
@@ -34,6 +49,9 @@ export class SpeechQueue {
   private gen = 0;
   private stopCurrent: (() => void) | null = null;
   private waiters: (() => void)[] = [];
+  /** Called each time a sentence actually starts playing (its echo is about to reach the microphone). */
+  onItemStart: ((firstAfterSilence: boolean) => void) | null = null;
+  private playedSinceIdle = false;
   /** Everything spoken since the last reset, for "repeat that". */
   readonly spokenLog: string[] = [];
 
@@ -70,6 +88,7 @@ export class SpeechQueue {
   private finish() {
     this.running = false;
     if (this.items.length === 0) {
+      this.playedSinceIdle = false;
       setConversationSpeaking(false);
       this.waiters.splice(0).forEach((w) => w());
     }
@@ -98,14 +117,40 @@ export class SpeechQueue {
           this.stopCurrent = null;
           resolve();
         };
-        audio.onended = done;
-        audio.onerror = done;
-        this.stopCurrent = () => {
-          audio.pause();
+        let finished = false;
+        const end = () => {
+          finished = true;
           done();
         };
-        audio.play().catch(done);
-      } else if ("speechSynthesis" in window) {
+        audio.onended = end;
+        audio.onerror = () => {
+          if (!hasBrowserVoice()) reportAudioFailure("This browser couldn’t play the tutor’s voice.");
+          end();
+        };
+        this.stopCurrent = () => {
+          audio.pause();
+          end();
+        };
+        // Autoplay can be refused until the page has seen a click: tell the UI and retry on the first one.
+        const attempt = () =>
+          audio.play().catch((err: unknown) => {
+            if ((err as Error)?.name === "NotAllowedError" && !finished) {
+              window.dispatchEvent(new Event("mn-audio-blocked"));
+              const retry = () => {
+                window.removeEventListener("pointerdown", retry);
+                window.removeEventListener("keydown", retry);
+                if (!finished) attempt();
+              };
+              window.addEventListener("pointerdown", retry);
+              window.addEventListener("keydown", retry);
+            } else end();
+          });
+        this.onItemStart?.(!this.playedSinceIdle);
+        this.playedSinceIdle = true;
+        void attempt();
+      } else if (hasBrowserVoice()) {
+        this.onItemStart?.(!this.playedSinceIdle);
+        this.playedSinceIdle = true;
         const u = new SpeechSynthesisUtterance(text);
         u.onend = u.onerror = () => {
           this.stopCurrent = null;

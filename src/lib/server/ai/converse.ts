@@ -92,12 +92,15 @@ export async function* runConverse(opts: { userId: string; body: ConverseRequest
 
   const opening = Boolean(body.opening);
   const lasso = Boolean(body.lasso) && !opening;
+  const event = !opening && !lasso ? body.event : undefined;
   const transcript = body.transcript ?? "";
-  const t: { kind: Triage["kind"] | "opening" | "lasso"; control: Triage["control"]; ack: string | null } = opening
+  const t: { kind: Triage["kind"] | "opening" | "lasso" | "event"; control: Triage["control"]; ack: string | null } = opening
     ? { kind: "opening", control: null, ack: null }
     : lasso
       ? { kind: "lasso", control: null, ack: null }
-      : await triage({ transcript, hasSelection, lastTutor, state, fast, signal });
+      : event
+        ? { kind: "event", control: null, ack: null }
+        : await triage({ transcript, hasSelection, lastTutor, state, fast, signal });
   if (t.kind === "control" && t.control) {
     yield { event: "control", data: { control: t.control } };
     return;
@@ -106,13 +109,13 @@ export async function* runConverse(opts: { userId: string; body: ConverseRequest
   const conversation = body.conversationId
     ? { id: body.conversationId }
     : await db.conversation.create({ data: { notebookId: body.notebookId, pageId: body.pageId, userId }, select: { id: true } });
-  if (!opening && !lasso) {
+  if (!opening && !lasso && !event) {
     await db.message.create({
       data: { conversationId: conversation.id, role: "USER", content: transcript, contextMeta: { via: "voice", kind: t.kind, pageId: body.pageId } as Prisma.InputJsonValue },
       select: { id: true },
     });
   }
-  const model = t.kind === "math" || t.kind === "opening" || t.kind === "lasso" ? main : fast;
+  const model = t.kind === "math" || t.kind === "opening" || t.kind === "lasso" || t.kind === "event" ? main : fast;
   yield { event: "meta", data: { conversationId: conversation.id, kind: t.kind, model: model.model } };
 
   const sentences = new SentenceStream();
@@ -137,15 +140,19 @@ export async function* runConverse(opts: { userId: string; body: ConverseRequest
       for await (const ev of main.stream({ messages, temperature: 0.5, maxOutputTokens: 300, signal })) {
         if (ev.type === "delta") yield* emit(sentences.push(ev.text));
       }
-    } else if (t.kind === "math" || t.kind === "lasso") {
+    } else if (t.kind === "math" || t.kind === "lasso" || t.kind === "event") {
       // Say something right away while the real answer is prepared. Not for replies inside a teaching
       // exchange ("I think it's 3"): those answer quickly and a filler would sound odd.
-      if (t.kind === "math" && !isActiveExchange(state)) yield { event: "ack", data: { text: t.ack?.trim() || pickAck() } };
+      if (t.kind === "math" && !isActiveExchange(state)) {
+        const ack = t.ack?.trim() || pickAck();
+        spoken = ack; // part of what the student hears, so it is shown and saved too
+        yield { event: "ack", data: { text: ack } };
+      }
 
-      const chatLike: ChatRequest = { ...body, message: transcript || "I circled this", intent: lasso ? "explain" : "hint" };
+      const chatLike: ChatRequest = { ...body, message: transcript || "I circled this", intent: lasso || event ? "explain" : "hint" };
       const ctx = await buildAgentContext({ userId, body: chatLike, intent: chatLike.intent ?? "hint", hasPreviousAssistant: history.length > 0 });
       const image = body.image && main.capabilities.vision ? body.image : null;
-      const messages = buildConverseMessages({ ctx, transcript, history, tutorState: state, imageDataUrl: image, visionAvailable: main.capabilities.vision, lasso });
+      const messages = buildConverseMessages({ ctx, transcript, history, tutorState: state, imageDataUrl: image, visionAvailable: main.capabilities.vision, lasso, event });
       for await (const ev of main.stream({ messages, temperature: 0.4, maxOutputTokens: 450, signal })) {
         if (ev.type === "delta") yield* emit(sentences.push(ev.text));
       }
@@ -172,7 +179,7 @@ export async function* runConverse(opts: { userId: string; body: ConverseRequest
     return;
   }
 
-  if (t.kind === "math" || t.kind === "opening" || t.kind === "lasso") {
+  if (t.kind === "math" || t.kind === "opening" || t.kind === "lasso" || t.kind === "event") {
     // The tutor appends its own state line; if it forgot, infer the stage from how the reply ends.
     const parsed = tutorStateSchema.safeParse(sentences.state);
     const next: TutorState = parsed.success ? parsed.data : { goal: state.goal, stage: /\?\s*$/.test(spoken) ? "check" : "explain", attempts: state.attempts };
