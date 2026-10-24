@@ -8,6 +8,7 @@ import { speak, isSpeaking } from "@/lib/client/speak";
 import { isConversationActive } from "@/lib/client/speech-state";
 import { unionRects, boundsOf, type Rect } from "@/lib/notebook/geometry";
 import type { NotebookObject } from "@/lib/notebook/schemas";
+import { findStepObject } from "@/lib/notebook/step-match";
 
 /** A flag plus the page-unit box of the wrong line, so the underline sits under that line only. */
 export type FlagView = WatchFlag & { rect: Rect };
@@ -21,7 +22,10 @@ const PRAISE = [
 ];
 
 /** Box around the line the model flagged: the student objects crossing its y, or the nearest one. */
-export function lineRect(work: NotebookObject[], y: number, pageWidth: number): Rect {
+export function lineRect(work: NotebookObject[], y: number, pageWidth: number, stepLatex?: string): Rect {
+  // Typed lines: the object that actually contains the flagged step beats the checker's position estimate.
+  const exact = stepLatex ? findStepObject(work, stepLatex, y) : null;
+  if (exact) return boundsOf(exact);
   const crossing = work.filter((o) => o.y - 6 <= y && y <= o.y + o.height + 6);
   const near =
     crossing.length > 0
@@ -184,7 +188,7 @@ export function useWorkWatcher(opts: { enabled: boolean; voice: boolean; noteboo
         );
         lastSig.current.set(pageId, sig);
         if (r.flag) {
-          setFlag({ pageId, flag: { ...r.flag, rect: lineRect(work, r.flag.y, page.width) } });
+          setFlag({ pageId, flag: { ...r.flag, rect: lineRect(work, r.flag.y, page.width, r.flag.latex) } });
           awaiting.current = { pageId, latex: r.flag.latex };
           setState("flagged");
           maybeSpeak(r.flag, pageId);
