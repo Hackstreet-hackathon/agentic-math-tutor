@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isActiveExchange, isPhantomTranscript, looksMathy, quickControl, triageSchema } from "./converse";
+import { looksLikeAnswer, isActiveExchange, isPhantomTranscript, looksMathy, quickControl, triageSchema } from "./converse";
 
 describe("converse helpers", () => {
   it("detects control phrases without a model", () => {
@@ -32,5 +32,10 @@ describe("converse helpers", () => {
   it("tolerates a bad triage reply", () => {
     expect(triageSchema.parse({ kind: "weird" }).kind).toBe("math");
     expect(triageSchema.parse({ kind: "smalltalk", control: null, ack: null }).kind).toBe("smalltalk");
+  });
+
+  it("tells answers apart from a change of subject mid-exercise", () => {
+    for (const t of ["two and three", "yes", "I think it's x equals negative two", "is it five", "I don't know", "um"]) expect(looksLikeAnswer(t)).toBe(true);
+    for (const t of ["Capital of France.", "what's the weather like today", "tell me a joke please"]) expect(looksLikeAnswer(t)).toBe(false);
   });
 });

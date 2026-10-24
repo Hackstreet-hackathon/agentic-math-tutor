@@ -17,8 +17,8 @@ export async function transcribeAudio(
     try {
       const e = env();
       const form = new FormData();
-      form.append("file", audioBlob, "audio.webm");
-      form.append("model", "whisper-1");
+      form.append("file", audioBlob, (audioBlob as File).name || "audio.webm");
+      form.append("model", e.OPENAI_STT_MODEL ?? "whisper-1");
       form.append("response_format", "json");
       // Whisper hallucinates text on silence; nudge it toward maths speech.
       form.append("prompt", "A student asking a maths question aloud.");
@@ -40,7 +40,7 @@ export async function transcribeAudio(
   if (STT_PROVIDER === "groq") {
     try {
       const form = new FormData();
-      form.append("file", audioBlob, "audio.webm");
+      form.append("file", audioBlob, (audioBlob as File).name || "audio.webm");
       form.append("model", "whisper-large-v3-turbo");
       form.append("response_format", "json");
 

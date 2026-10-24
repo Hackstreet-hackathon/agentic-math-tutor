@@ -68,8 +68,15 @@ export function isActiveExchange(state: TutorState | null | undefined): boolean 
   return Boolean(state && (state.stage === "hint" || state.stage === "check" || state.stage === "explain"));
 }
 
-const MATHY = /[0-9=+\-*/^√∫∑]|\b(equation|solve|solving|derivative|differentiate|integral|integrate|limit|matrix|matrices|determinant|inverse|factor|expand|simplify|rule|step|formula|theorem|fraction|algebra|calculus|graph|slope|angle|triangle|prime|root|square|exponent|logarithm|sin|cos|tan|quadratic|polynomial|sum|product|why|how)\b/i;
+const MATHY = /[0-9=+\-*/^√∫∑]|\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|plus|minus|times|divide|divided|multiply|multiplied|add|added|subtract|equals?|negative|half|twice|equation|solve|solving|derivative|differentiate|integral|integrate|limit|matrix|matrices|determinant|inverse|factor|expand|simplify|rule|step|formula|theorem|fraction|algebra|calculus|graph|slope|angle|triangle|prime|root|square|exponent|logarithm|sin|cos|tan|quadratic|polynomial|sum|product|why|how)\b/i;
 /** Cheap pre-check: with a circled selection, almost anything the student says is about it. */
 export function looksMathy(t: string, hasSelection: boolean): boolean {
   return hasSelection ? /\b(this|that|these|here|it|step|rule|why|how|what|which|solve|mean)\b/i.test(t) || MATHY.test(t) : MATHY.test(t);
+}
+
+const ANSWER_START = /^(yes|no|yeah|yep|nope|maybe|sure|ok|okay|right|correct|i think|i guess|i don'?t know|idk|not sure|um|uh|hmm|so|oh|because|is it|it'?s|it is|wait|hold on|can you|could you|what do you mean|again)\b/i;
+/** During a teaching exchange, short or maths-flavoured replies are answers; anything else may be a change of subject. */
+export function looksLikeAnswer(t: string): boolean {
+  const words = t.trim().split(/\s+/).length;
+  return words <= 2 || ANSWER_START.test(t.trim()) || MATHY.test(t);
 }

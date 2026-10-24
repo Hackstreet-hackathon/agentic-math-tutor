@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { IDLE_STATE, isPhantomTranscript, type ConverseRequest, type TutorState } from "@/lib/ai/converse";
 import { ChatError, streamConverse } from "@/lib/client/ai";
 import { SpeechQueue } from "@/lib/client/speech-queue";
+import { encodeWav } from "@/lib/client/wav";
 
 export type ConvoState = "off" | "listening" | "hearing" | "transcribing" | "thinking" | "speaking";
 
@@ -29,10 +30,24 @@ interface Options {
   onStopListening: () => void;
 }
 
-const END_SILENCE_MS = 1100;
+/** Keep only the first `keep` samples (drops the silence that ended the turn, so less audio is uploaded). */
+function trimTail(chunks: Float32Array[], keep: number): Float32Array[] {
+  const out: Float32Array[] = [];
+  let left = Math.floor(keep);
+  for (const c of chunks) {
+    if (left <= 0) break;
+    out.push(c.length <= left ? c : c.subarray(0, left));
+    left -= c.length;
+  }
+  return out;
+}
+
+const END_SILENCE_MS = 900;
 const MIN_SPEECH_MS = 500;
-const BARGE_IN_MS = 300;
-const IDLE_RESTART_MS = 8000;
+const BARGE_WINDOW = 6; // ticks
+const BARGE_VOTES = 3;
+const PRE_ROLL_MS = 700;
+const MAX_UTTERANCE_S = 30;
 const TICK_MS = 80;
 
 /**
@@ -161,29 +176,48 @@ export function useConversation(opts: Options) {
     let stopped = false;
     let stream: MediaStream | null = null;
     let ctx: AudioContext | null = null;
-    let recorder: MediaRecorder | null = null;
-    let chunks: Blob[] = [];
-    let recorderStartedAt = 0;
+    let analyser: AnalyserNode | null = null;
+    let capture: AudioWorkletNode | null = null;
+    let workletUrl: string | null = null;
     let tick: ReturnType<typeof setInterval> | null = null;
+    // Raw audio is always flowing into a short rolling buffer (the "pre-roll"). When speech starts, that
+    // buffer becomes the start of the utterance, so the first syllable is never lost and nothing the tutor
+    // said earlier is ever uploaded.
+    const ring: Float32Array[] = [];
+    let ringSamples = 0;
+    let utterance: Float32Array[] | null = null;
+    let utteranceSamples = 0;
+    /** Samples captured up to the last moment of speech; everything after is the silence that ended the turn. */
+    let speechEndSamples = 0;
     let speechStart: number | null = null;
     let lastSpeech = 0;
-    let loudSince: number | null = null;
+    const votes: boolean[] = [];
     let floor = 0.01;
 
-    const startRecorder = () => {
-      if (!stream || stopped) return;
-      chunks = [];
-      recorder = new MediaRecorder(stream);
-      recorder.ondataavailable = (e) => e.data.size > 0 && chunks.push(e.data);
-      recorder.start();
-      recorderStartedAt = Date.now();
+    const onAudio = (chunk: Float32Array) => {
+      if (utterance) {
+        utterance.push(chunk);
+        utteranceSamples += chunk.length;
+        return;
+      }
+      ring.push(chunk);
+      ringSamples += chunk.length;
+      const keep = ((ctx?.sampleRate ?? 48000) * PRE_ROLL_MS) / 1000;
+      while (ring.length > 1 && ringSamples - ring[0]!.length >= keep) ringSamples -= ring.shift()!.length;
+    };
+    const beginUtterance = () => {
+      utterance = [...ring];
+      utteranceSamples = ringSamples;
+      speechEndSamples = ringSamples;
+      ring.length = 0;
+      ringSamples = 0;
     };
 
     const transcribe = async (blob: Blob) => {
       setState("transcribing");
       try {
         const form = new FormData();
-        form.append("audio", blob, "audio.webm");
+        form.append("audio", blob, "audio.wav");
         const res = await fetch("/api/ai/stt", { method: "POST", body: form });
         if (res.status === 503) {
           o.current.onError("Speech recognition isn’t set up on the server (STT_PROVIDER).");
@@ -202,19 +236,14 @@ export function useConversation(opts: Options) {
     };
 
     const endUtterance = () => {
-      const r = recorder;
-      if (!r || r.state === "inactive") return;
+      const chunks = utterance;
+      utterance = null;
       speechStart = null;
-      r.onstop = () => {
-        const blob = new Blob(chunks, { type: "audio/webm" });
-        startRecorder();
-        void transcribe(blob);
-      };
-      r.stop();
+      if (!chunks || !ctx) return;
+      void transcribe(encodeWav(trimTail(chunks, speechEndSamples + ctx.sampleRate * 0.25), ctx.sampleRate));
     };
 
     const onTick = () => {
-      const analyser = analyserRef;
       if (!analyser) return;
       const data = new Uint8Array(analyser.frequencyBinCount);
       analyser.getByteTimeDomainData(data);
@@ -229,45 +258,46 @@ export function useConversation(opts: Options) {
       if (s === "thinking" || s === "transcribing") return;
 
       if (s === "speaking") {
-        // Barge-in: sustained, clearly louder speech than the tutor's own echo.
-        if (rms > Math.max(0.09, threshold * 2.5)) {
-          loudSince ??= now;
-          if (now - loudSince >= BARGE_IN_MS) {
-            loudSince = null;
-            queue.current?.cancel();
-            abort.current?.abort();
-            if (recorder && recorder.state !== "inactive") {
-              recorder.onstop = () => startRecorder();
-              recorder.stop();
-            }
-            speechStart = now;
-            lastSpeech = now;
-            setState("hearing");
-          }
-        } else loudSince = null;
+        // Barge-in: speech has quiet gaps between syllables, so vote over a short window (3 of the last 6
+        // ticks clearly louder than room noise) instead of requiring unbroken volume. Echo cancellation keeps
+        // the tutor's own voice well below this level.
+        votes.push(rms > Math.max(0.05, threshold * 2));
+        if (votes.length > BARGE_WINDOW) votes.shift();
+        if (votes.filter(Boolean).length >= BARGE_VOTES) {
+          votes.length = 0;
+          queue.current?.cancel();
+          abort.current?.abort();
+          beginUtterance();
+          speechStart = now - (BARGE_WINDOW * TICK_MS) / 2;
+          lastSpeech = now;
+          setState("hearing");
+        }
         return;
       }
+      votes.length = 0;
 
       if (rms > threshold) {
-        speechStart ??= now;
+        if (speechStart === null) {
+          speechStart = now;
+          beginUtterance();
+        }
         lastSpeech = now;
+        speechEndSamples = utteranceSamples;
         if (s !== "hearing") setState("hearing");
       } else if (speechStart !== null) {
         if (now - lastSpeech > END_SILENCE_MS) {
           if (lastSpeech - speechStart >= MIN_SPEECH_MS) endUtterance();
           else {
+            utterance = null;
             speechStart = null;
             setState("listening");
           }
         }
-      } else if (s === "listening" && now - recorderStartedAt > IDLE_RESTART_MS && recorder?.state === "recording") {
-        // Nobody spoke for a while: drop the silent audio instead of uploading it later.
-        recorder.onstop = () => startRecorder();
-        recorder.stop();
       }
+      // Very long monologue or a stuck noise source: send what we have.
+      if (utterance && utteranceSamples > (ctx?.sampleRate ?? 48000) * MAX_UTTERANCE_S) endUtterance();
     };
 
-    let analyserRef: AnalyserNode | null = null;
     (async () => {
       try {
         if (!navigator.mediaDevices?.getUserMedia) throw new DOMException("insecure", "SecurityError");
@@ -277,11 +307,22 @@ export function useConversation(opts: Options) {
           return;
         }
         ctx = new AudioContext();
-        const analyser = ctx.createAnalyser();
+        const source = ctx.createMediaStreamSource(stream);
+        analyser = ctx.createAnalyser();
         analyser.fftSize = 512;
-        ctx.createMediaStreamSource(stream).connect(analyser);
-        analyserRef = analyser;
-        startRecorder();
+        source.connect(analyser);
+
+        const code = "class C extends AudioWorkletProcessor{process(i){const c=i[0][0];if(c)this.port.postMessage(c.slice(0));return true}}registerProcessor('mn-capture',C)";
+        workletUrl = URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
+        await ctx.audioWorklet.addModule(workletUrl);
+        if (stopped) return;
+        capture = new AudioWorkletNode(ctx, "mn-capture");
+        capture.port.onmessage = (e) => onAudio(e.data as Float32Array);
+        const mute = ctx.createGain();
+        mute.gain.value = 0;
+        source.connect(capture);
+        capture.connect(mute).connect(ctx.destination);
+
         setState("listening");
         tick = setInterval(onTick, TICK_MS);
       } catch (e) {
@@ -302,16 +343,10 @@ export function useConversation(opts: Options) {
     return () => {
       stopped = true;
       if (tick) clearInterval(tick);
-      try {
-        if (recorder && recorder.state !== "inactive") {
-          recorder.onstop = null;
-          recorder.stop();
-        }
-      } catch {
-        /* already stopped */
-      }
+      capture?.disconnect();
       stream?.getTracks().forEach((t) => t.stop());
       void ctx?.close();
+      if (workletUrl) URL.revokeObjectURL(workletUrl);
       queue.current?.cancel();
       abort.current?.abort();
     };

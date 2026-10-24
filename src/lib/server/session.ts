@@ -18,7 +18,13 @@ const known = new Set<string>();
 
 async function ensureUser(id: string) {
   if (known.has(id)) return db.user.findUniqueOrThrow({ where: { id } });
-  const user = await db.user.upsert({ where: { id }, create: { id, isGuest: true, displayName: "Guest" }, update: {} });
+  // Several requests can arrive together on a first visit; losing the insert race is fine.
+  const user = await db.user
+    .upsert({ where: { id }, create: { id, isGuest: true, displayName: "Guest" }, update: {} })
+    .catch((e: { code?: string }) => {
+      if (e?.code === "P2002") return db.user.findUniqueOrThrow({ where: { id } });
+      throw e;
+    });
   if (known.size > 5000) known.clear();
   known.add(id);
   return user;

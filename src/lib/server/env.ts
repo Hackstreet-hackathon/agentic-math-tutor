@@ -34,6 +34,8 @@ const schema = z.object({
 
   STT_PROVIDER: z.enum(["openai", "groq", "gradium", "none"]).default("none"),
   TTS_PROVIDER: z.enum(["openai", "gradium", "none"]).default("none"),
+  /** Speech-to-text model for STT_PROVIDER=openai (default whisper-1; gpt-4o-mini-transcribe also works). */
+  OPENAI_STT_MODEL: optionalString,
   OPENAI_TTS_MODEL: optionalString,
   OPENAI_TTS_VOICE: optionalString,
   GRADIUM_API_KEY: optionalString,

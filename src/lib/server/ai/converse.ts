@@ -3,6 +3,7 @@ import {
   IDLE_STATE,
   TRIAGE_JSON_SCHEMA,
   isActiveExchange,
+  looksLikeAnswer,
   looksMathy,
   quickControl,
   tutorStateSchema,
@@ -49,8 +50,9 @@ export async function triage(opts: { transcript: string; hasSelection: boolean; 
   const { transcript, hasSelection, lastTutor, state, fast, signal } = opts;
   const control = quickControl(transcript);
   if (control) return { kind: "control", control, ack: null };
-  // Mid-exchange answers and anything about a circled selection go straight to the main model.
-  if (isActiveExchange(state) || (hasSelection && looksMathy(transcript, true))) return { kind: "math", control: null, ack: null };
+  // Mid-exchange answers and anything about a circled selection go straight to the main model;
+  // a change of subject ("what's the capital of France") still gets triaged.
+  if ((isActiveExchange(state) && looksLikeAnswer(transcript)) || (hasSelection && looksMathy(transcript, true))) return { kind: "math", control: null, ack: null };
 
   try {
     const r = await fast.generate({
