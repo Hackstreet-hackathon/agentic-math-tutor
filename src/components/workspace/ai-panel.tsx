@@ -199,6 +199,16 @@ export function AiPanel(props: {
               : it,
           ),
         );
+        // Auto-insert solution onto the page when the answer has content
+        if (final.answer.steps.some((s) => s.latex) || final.answer.finalAnswer) {
+          void props.onInsertSolution({
+            answer: final.answer,
+            verification: final.verification ?? { status: "UNSUPPORTED" },
+            messageId: final.messageId,
+            sourceQuestion: message,
+            region: region?.bounds ?? null,
+          });
+        }
       } catch (e) {
         if ((e as Error).name === "AbortError") {
           setItems((prev) => prev.filter((it) => it.id !== pendingId));
