@@ -6,7 +6,6 @@ import type { LLMCapabilities, LLMProvider } from "./types";
 let cached: { key: string; provider: LLMProvider } | undefined;
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
-const GROQ_BASE = "https://api.groq.com/openai/v1";
 
 /**
  * The small, fast model used by the voice conversation for triage and small talk.
@@ -16,16 +15,13 @@ export function getFastLLM(): LLMProvider | null {
   const e = env();
   let choice = e.FAST_LLM_PROVIDER;
   if (choice === "none") return null;
-  if (choice === "groq" && !e.GROQ_API_KEY) choice = "openai";
   if (choice === "gemini" && !e.GEMINI_API_KEY) choice = "openai";
   if (choice === "openai" && !e.OPENAI_API_KEY) return null;
 
   const cfg =
-    choice === "groq"
-      ? { id: "groq" as const, baseUrl: GROQ_BASE, apiKey: e.GROQ_API_KEY!, model: e.FAST_LLM_MODEL ?? "llama-3.1-8b-instant" }
-      : choice === "gemini"
-        ? { id: "gemini" as const, baseUrl: GEMINI_BASE, apiKey: e.GEMINI_API_KEY!, model: e.FAST_LLM_MODEL ?? "gemini-2.5-flash-lite" }
-        : { id: "openai" as const, baseUrl: e.OPENAI_BASE_URL ?? "https://api.openai.com/v1", apiKey: e.OPENAI_API_KEY!, model: e.FAST_LLM_PROVIDER === "openai" && e.FAST_LLM_MODEL ? e.FAST_LLM_MODEL : "gpt-4o-mini" };
+    choice === "gemini"
+      ? { id: "gemini" as const, baseUrl: GEMINI_BASE, apiKey: e.GEMINI_API_KEY!, model: e.FAST_LLM_MODEL ?? "gemini-2.5-flash-lite" }
+      : { id: "openai" as const, baseUrl: e.OPENAI_BASE_URL ?? "https://api.openai.com/v1", apiKey: e.OPENAI_API_KEY!, model: e.FAST_LLM_PROVIDER === "openai" && e.FAST_LLM_MODEL ? e.FAST_LLM_MODEL : "gpt-4o-mini" };
 
   const key = `${cfg.id}|${cfg.model}|${cfg.apiKey.length}|${cfg.baseUrl}`;
   if (cached?.key === key) return cached.provider;

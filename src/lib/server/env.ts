@@ -15,12 +15,10 @@ const schema = z.object({
   OBJECT_STORAGE_ACCESS_KEY: optionalString,
   OBJECT_STORAGE_SECRET_KEY: optionalString,
 
-  LLM_PROVIDER: z.enum(["openai", "groq", "none"]).default("none"),
+  LLM_PROVIDER: z.enum(["openai", "none"]).default("none"),
   OPENAI_API_KEY: optionalString,
   OPENAI_MODEL: optionalString,
   OPENAI_BASE_URL: optionalString,
-  GROQ_API_KEY: optionalString,
-  GROQ_MODEL: optionalString,
   /** Per-request upstream timeout for LLM calls. */
   LLM_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(60_000),
   LLM_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(200).max(16_000).default(1_800),
@@ -32,7 +30,7 @@ const schema = z.object({
   /** Requests per user per minute on expensive AI endpoints. */
   AI_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).max(10_000).default(20),
 
-  STT_PROVIDER: z.enum(["openai", "groq", "gradium", "none"]).default("none"),
+  STT_PROVIDER: z.enum(["openai", "gradium", "none"]).default("none"),
   TTS_PROVIDER: z.enum(["openai", "gradium", "none"]).default("none"),
   /** Speech-to-text model for STT_PROVIDER=openai (default whisper-1; gpt-4o-mini-transcribe also works). */
   OPENAI_STT_MODEL: optionalString,
@@ -40,8 +38,8 @@ const schema = z.object({
   OPENAI_TTS_VOICE: optionalString,
   GRADIUM_API_KEY: optionalString,
 
-  /** Fast model for voice-conversation triage and small talk (free options: groq, gemini). */
-  FAST_LLM_PROVIDER: z.enum(["openai", "groq", "gemini", "none"]).default("openai"),
+  /** Fast model for voice-conversation triage and small talk (OpenAI gpt-4o-mini, or free Gemini). */
+  FAST_LLM_PROVIDER: z.enum(["openai", "gemini", "none"]).default("openai"),
   FAST_LLM_MODEL: optionalString,
   GEMINI_API_KEY: optionalString,
   /** Speaking style for gpt-4o-mini-tts, e.g. "warm, encouraging teacher". */

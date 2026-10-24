@@ -1,7 +1,7 @@
 import { ProviderError, type LLMCapabilities, type LLMMessage, type LLMProvider, type LLMRequest, type LLMResult, type LLMStreamEvent, type ResponseFormat } from "./types";
 
 export interface OpenAICompatibleConfig {
-  id: "openai" | "groq" | "gemini";
+  id: "openai" | "gemini";
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -11,14 +11,14 @@ export interface OpenAICompatibleConfig {
 }
 
 /**
- * Chat Completions client for OpenAI and any OpenAI-compatible API (Groq, ...).
+ * Chat Completions client for OpenAI and any OpenAI-compatible API (Gemini, ...).
  * - Streams over SSE and reports token usage when the provider sends it.
  * - Honours caller cancellation and a hard timeout.
  * - Downgrades json_schema -> json_object -> plain when the provider rejects the mode.
  * Error messages are safe to show to students; keys and bodies are never included.
  */
 export class OpenAICompatibleProvider implements LLMProvider {
-  readonly id: "openai" | "groq" | "gemini";
+  readonly id: "openai" | "gemini";
   readonly model: string;
   readonly capabilities: LLMCapabilities;
   private cfg: OpenAICompatibleConfig;

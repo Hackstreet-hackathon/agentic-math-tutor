@@ -6,7 +6,7 @@ export interface ClassifyResult {
 }
 
 /**
- * Uses gpt-4o-mini (OpenAI) or Groq Llama to determine whether a transcription is a
+ * Uses OpenAI gpt-4o-mini to determine whether a transcription is a
  * math / science question.  Falls back to optimistic "let it through" when
  * no API key is present.
  */
@@ -17,13 +17,12 @@ export async function classifyQuestion(
   const e = env();
 
   // Same provider as speech-to-text. No key or STT disabled → optimistic default so the user still gets answers.
-  const openai = e.STT_PROVIDER === "openai";
-  const apiKey = openai ? e.OPENAI_API_KEY : e.GROQ_API_KEY;
+  const apiKey = e.OPENAI_API_KEY;
   if (!apiKey || e.STT_PROVIDER === "none") {
     return { isMathQuestion: true, confidence: "low" };
   }
-  const url = openai ? `${e.OPENAI_BASE_URL ?? "https://api.openai.com/v1"}/chat/completions` : "https://api.groq.com/openai/v1/chat/completions";
-  const model = openai ? "gpt-4o-mini" : "llama-3.1-8b-instant";
+  const url = `${e.OPENAI_BASE_URL ?? "https://api.openai.com/v1"}/chat/completions`;
+  const model = "gpt-4o-mini";
 
   try {
     const res = await fetch(url, {

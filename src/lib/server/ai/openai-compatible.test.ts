@@ -128,8 +128,6 @@ describe("resolveCapabilities", () => {
     expect(resolveCapabilities("openai", "o3-mini")).toMatchObject({ vision: false, jsonSchema: true, temperature: false });
     expect(resolveCapabilities("openai", "gpt-3.5-turbo")).toMatchObject({ vision: false, jsonSchema: false });
     expect(resolveCapabilities("openai", "totally-new-model")).toMatchObject({ streaming: true, vision: false, jsonSchema: false });
-    expect(resolveCapabilities("groq", "meta-llama/llama-4-scout-17b-16e-instruct")).toMatchObject({ vision: true, jsonSchema: true });
-    expect(resolveCapabilities("groq", "llama-3.3-70b-versatile")).toMatchObject({ vision: false, jsonSchema: false, jsonObject: true });
   });
   it("honours explicit overrides", () => {
     expect(resolveCapabilities("openai", "totally-new-model", { vision: "true", jsonSchema: "true" })).toMatchObject({ vision: true, jsonSchema: true });

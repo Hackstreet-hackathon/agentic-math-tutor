@@ -37,30 +37,5 @@ export async function transcribeAudio(
     }
   }
 
-  if (STT_PROVIDER === "groq") {
-    try {
-      const form = new FormData();
-      form.append("file", audioBlob, (audioBlob as File).name || "audio.webm");
-      form.append("model", "whisper-large-v3-turbo");
-      form.append("response_format", "json");
-
-      const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env().GROQ_API_KEY ?? ""}`,
-        },
-        body: form,
-        signal,
-      });
-
-      if (!res.ok) return null;
-
-      const json = (await res.json()) as { text: string };
-      return { transcript: json.text };
-    } catch {
-      return null;
-    }
-  }
-
   return null;
 }

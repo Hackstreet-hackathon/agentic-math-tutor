@@ -44,7 +44,7 @@ export interface LLMCapabilities {
 }
 
 export interface LLMProvider {
-  readonly id: "openai" | "groq" | "gemini";
+  readonly id: "openai" | "gemini";
   readonly model: string;
   readonly capabilities: LLMCapabilities;
   generate(req: LLMRequest): Promise<LLMResult>;

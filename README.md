@@ -37,9 +37,8 @@ See [`.env.example`](.env.example) — placeholders only. **Secrets are server-s
 | `STORAGE_PROVIDER` (`local`\|`s3`), `LOCAL_STORAGE_DIR` | no (default: local `./storage-data`) | Where uploaded PDFs live |
 | `OBJECT_STORAGE_ENDPOINT/REGION/BUCKET/ACCESS_KEY/SECRET_KEY` | when `STORAGE_PROVIDER=s3` | Any S3-compatible store (AWS S3, R2, MinIO, B2) |
 | `MAX_PDF_MB` | no (default 50) | Upload size limit |
-| `LLM_PROVIDER` (`openai`\|`groq`\|`none`), `OPENAI_API_KEY`, `OPENAI_MODEL` | AI tutor | Enable the AI panel. Set to `none` to disable. |
+| `LLM_PROVIDER` (`openai`\|`none`), `OPENAI_API_KEY`, `OPENAI_MODEL` | AI tutor | Enable the AI panel. Set to `none` to disable. |
 | `OPENAI_BASE_URL` | AI tutor | Custom endpoint (Azure OpenAI, LM Studio, Ollama, etc.). Default: `https://api.openai.com/v1` |
-| `GROQ_API_KEY`, `GROQ_MODEL` | AI tutor (Groq) | Alternative to OpenAI |
 | `LLM_TIMEOUT_MS` | no (default 60000) | Per-request upstream timeout in milliseconds |
 | `LLM_MAX_OUTPUT_TOKENS` | no (default 1800) | Maximum tokens in each AI response |
 | `AI_RATE_LIMIT_PER_MIN` | no (default 20) | Requests per user per minute |
@@ -60,14 +59,6 @@ OPENAI_MODEL=gpt-4o-mini        # recommended: cheap, fast, vision-capable
 ```
 
 Recommended models in order of capability: `gpt-4o`, `gpt-4o-mini`, `o3-mini`. Vision (image of the circled region) requires `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, or any `o3`/`o4` model.
-
-### Groq (fast, free tier available)
-
-```env
-LLM_PROVIDER=groq
-GROQ_API_KEY=gsk_…
-GROQ_MODEL=llama-4-scout-17b-16e-instruct
-```
 
 ### Custom / self-hosted endpoint (OpenAI-compatible)
 
@@ -110,7 +101,7 @@ Open the AI panel and press **Talk**. The tutor listens continuously (voice-acti
 
 When you press Talk the tutor speaks first: on a PDF page it opens from that page's text ("This page is about quadratics — shall we start with Problem 1?"), on an empty notebook it asks what you are learning today, and it asks whether you have any doubts. The tutor is **maths-only**: other subjects, trivia, code, jokes and attempts to change its rules are politely declined (greetings and "I'm tired" get one warm line and a nudge back to maths). Circling something with the **lasso** makes the tutor take the lead: it opens the panel (even if it was closed), says what it sees inside the circle and asks what you want to do with it. If the page or circled text is not maths (or a scan it can't read yet) it says so and asks for a maths page / to circle the problem. The whole conversation (typed and spoken) lives in the AI tutor panel and is restored after a reload.
 
-Needs `STT_PROVIDER=openai` and `TTS_PROVIDER=openai`. The fast model is set with `FAST_LLM_PROVIDER` (`openai` → gpt-4o-mini by default, or free `groq` / `gemini` with their API keys) and `FAST_LLM_MODEL`. The microphone only works on `https://` or `http://localhost`.
+Needs `STT_PROVIDER=openai` and `TTS_PROVIDER=openai`. The fast model is set with `FAST_LLM_PROVIDER` (`openai` → gpt-4o-mini by default, or the free `gemini` with `GEMINI_API_KEY`) and `FAST_LLM_MODEL`. The microphone only works on `https://` or `http://localhost`.
 
 ### Known limitations of the AI tutor
 

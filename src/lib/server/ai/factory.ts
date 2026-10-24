@@ -12,21 +12,20 @@ export function getLLM(): LLMLookup {
   const e = env();
   if (e.LLM_PROVIDER === "none") return { ok: false, reason: "No AI provider is configured (LLM_PROVIDER)." };
 
-  const isGroq = e.LLM_PROVIDER === "groq";
-  const apiKey = isGroq ? e.GROQ_API_KEY : e.OPENAI_API_KEY;
-  const model = isGroq ? e.GROQ_MODEL : e.OPENAI_MODEL;
-  if (!apiKey) return { ok: false, reason: `${isGroq ? "GROQ_API_KEY" : "OPENAI_API_KEY"} is not set.` };
-  if (!model) return { ok: false, reason: `${isGroq ? "GROQ_MODEL" : "OPENAI_MODEL"} is not set.` };
+  const apiKey = e.OPENAI_API_KEY;
+  const model = e.OPENAI_MODEL;
+  if (!apiKey) return { ok: false, reason: "OPENAI_API_KEY is not set." };
+  if (!model) return { ok: false, reason: "OPENAI_MODEL is not set." };
 
   const key = `${e.LLM_PROVIDER}|${model}|${apiKey.length}|${e.OPENAI_BASE_URL ?? ""}`;
   if (cached?.key === key) return { ok: true, provider: cached.provider };
 
   const provider = new OpenAICompatibleProvider({
-    id: e.LLM_PROVIDER as "openai" | "groq",
-    baseUrl: isGroq ? "https://api.groq.com/openai/v1" : (e.OPENAI_BASE_URL ?? "https://api.openai.com/v1"),
+    id: "openai",
+    baseUrl: e.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
     apiKey,
     model,
-    capabilities: resolveCapabilities(e.LLM_PROVIDER as "openai" | "groq", model, {
+    capabilities: resolveCapabilities("openai", model, {
       vision: e.LLM_SUPPORTS_VISION,
       jsonSchema: e.LLM_SUPPORTS_JSON_SCHEMA,
       jsonObject: e.LLM_SUPPORTS_JSON_OBJECT,
