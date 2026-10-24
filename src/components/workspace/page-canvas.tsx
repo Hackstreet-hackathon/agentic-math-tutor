@@ -9,6 +9,8 @@ import { EquationEditor, TextEditor } from "./editors";
 import { InteractionLayer, type Preview } from "./interaction-layer";
 import { ObjectsLayer } from "./objects-layer";
 import { PdfPageBackground } from "./pdf-page-background";
+import { FlagOverlay } from "./watch-card";
+import type { WatchFlag } from "@/lib/ai/watch";
 
 // Konva touches `window`/canvas at import time, so it is client-only.
 const InkStage = dynamic(() => import("./ink-stage"), { ssr: false });
@@ -25,6 +27,7 @@ interface Props {
   onDeleteSelection: () => void;
   onAskAi?: () => void;
   onMeasure?: (id: string, height: number) => void;
+  watchFlag?: { flag: WatchFlag; onShowMe: () => void; onFix: () => void; onNotAMistake: () => void } | null;
 }
 
 /**
@@ -35,7 +38,7 @@ interface Props {
  *  4. interaction layer (all pointer input, live previews, selection frame)
  *  5. in-place editors
  */
-export function PageCanvas({ page, editor, patchEditor, onCommit, scrollRef, onDuplicate, onDeleteSelection, onAskAi, onMeasure }: Props) {
+export function PageCanvas({ page, editor, patchEditor, onCommit, scrollRef, onDuplicate, onDeleteSelection, onAskAi, onMeasure, watchFlag }: Props) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const zoom = editor.zoom;
   const editingId = editor.editing?.draft.id;
@@ -114,6 +117,9 @@ export function PageCanvas({ page, editor, patchEditor, onCommit, scrollRef, onD
         onDeleteSelection={onDeleteSelection}
         onAskAi={onAskAi}
       />
+      {watchFlag && (
+        <FlagOverlay key={`${watchFlag.flag.stepIndex}:${watchFlag.flag.latex}`} flag={watchFlag.flag} zoom={zoom} pageWidth={page.width} onShowMe={watchFlag.onShowMe} onFix={watchFlag.onFix} onNotAMistake={watchFlag.onNotAMistake} />
+      )}
       {editor.editing?.draft.type === "TEXT" && (
         <TextEditor key={editor.editing.draft.id} draft={editor.editing.draft as TextObject} zoom={zoom} onDone={finishText} />
       )}

@@ -100,6 +100,10 @@ OPENAI_MODEL=gpt-4o-mini
 
 The fake LLM returns structured answers and echoes the request so you can inspect what the server sends to the model.
 
+### Watch my work
+
+Turn on **Watch my work** in the top bar and the tutor reads your working as you write (handwriting via a vision model, or typed text/equations). A couple of seconds after you stop, it checks each step; if one is wrong it underlines it on the page with a small hint (no answer given). **Show me** asks the tutor for the full correction, **I'll fix it** dismisses until you change the work, **Not a mistake** stops flagging that step. The speaker button enables a short spoken, light-hearted hint (at most one per 45 s). Handwriting needs a vision-capable model (e.g. `gpt-4o`); checks are AI-judged, and unreadable or low-confidence work is never flagged. Uses `POST /api/ai/watch` (30 requests/min per user).
+
 ### Known limitations of the AI tutor
 
 - Answers are labelled **"AI-generated · not verified"**. The UI never shows "Verified" unless deterministic SymPy verification succeeds (Phase 4).

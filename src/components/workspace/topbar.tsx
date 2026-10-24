@@ -24,6 +24,7 @@ export function TopBar({
   onToggleAi,
   graphOpen,
   onToggleGraph,
+  watch,
 }: {
   title: string;
   onRename: (title: string) => void;
@@ -41,6 +42,7 @@ export function TopBar({
   onToggleAi: () => void;
   graphOpen: boolean;
   onToggleGraph: () => void;
+  watch?: React.ReactNode;
   notice?: { tone: "info" | "warn"; text: string; busy?: boolean; title?: string } | null;
 }) {
   // null = not editing; show the committed title.
@@ -112,6 +114,7 @@ export function TopBar({
         </span>
       )}
       <SaveIndicator status={status} onRetry={onRetrySave} />
+      {watch}
       <Tip label={graphOpen ? "Hide graph" : "Open graph"}>
         <button
           onClick={onToggleGraph}

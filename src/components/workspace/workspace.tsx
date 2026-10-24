@@ -12,9 +12,12 @@ import type { Change } from "@/lib/notebook/ops";
 import { currentPage, initialState, reducer } from "@/lib/notebook/store";
 import { newId } from "@/lib/utils";
 import { initialEditor, MAX_ZOOM, MIN_ZOOM, type EditorState } from "./editor";
+import type { Intent } from "@/lib/ai/answer";
 import { AiPanel, type InsertRequest } from "./ai-panel";
 import { GraphPanel } from "./graph-panel";
 import { markFreshSolution } from "./objects-layer";
+import { useWorkWatcher } from "./use-work-watcher";
+import { WatchToggle } from "./watch-card";
 import { PageCanvas } from "./page-canvas";
 import { Sidebar } from "./sidebar";
 import { DrawingToolbar, TOOL_SHORTCUTS } from "./toolbar";
@@ -86,6 +89,27 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
   const [selectionAnchor, setSelectionAnchor] = useState<{ x: number; y: number } | null>(null);
 
   const page = currentPage(state);
+
+  // "Watch my work": live tracking of the student's steps. Preferences are per-browser conveniences.
+  const [watchOn, setWatchOn] = useState(false);
+  const [watchVoice, setWatchVoice] = useState(true);
+  const [autoAsk, setAutoAsk] = useState<{ nonce: number; text: string; intent?: Intent } | null>(null);
+  useEffect(() => {
+    try {
+      setWatchOn(localStorage.getItem("mn-watch") === "1"); // eslint-disable-line react-hooks/set-state-in-effect
+      setWatchVoice(localStorage.getItem("mn-watch-voice") !== "0");
+    } catch {
+      /* storage unavailable: keep defaults */
+    }
+  }, []);
+  const persist = (k: string, v: boolean) => {
+    try {
+      localStorage.setItem(k, v ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  };
+  const watcher = useWorkWatcher({ enabled: watchOn, voice: watchVoice, notebookId: notebook.id, page });
 
   // Poll text-extraction status while any document is still processing; the notebook stays usable meanwhile.
   const pendingIds = Object.values(docs).filter((d) => d.status === "UPLOADED" || d.status === "PROCESSING").map((d) => d.id).join(",");
@@ -410,6 +434,15 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
         onToggleAi={() => setAiOpen((o) => !o)}
         graphOpen={graphOpen}
         onToggleGraph={() => setGraphOpen((o) => !o)}
+        watch={
+          <WatchToggle
+            enabled={watchOn}
+            onToggle={() => setWatchOn((v) => { persist("mn-watch", !v); return !v; })}
+            voice={watchVoice}
+            onToggleVoice={() => setWatchVoice((v) => { persist("mn-watch-voice", !v); return !v; })}
+            state={watcher.state}
+          />
+        }
       />
       <div className="flex min-h-0 flex-1">
         {sidebarOpen && (
@@ -429,6 +462,25 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
                 onDeleteSelection={deleteSelection}
                 onAskAi={askAi}
                 onMeasure={onMeasure}
+                watchFlag={
+                  watcher.flag
+                    ? {
+                        flag: watcher.flag,
+                        onShowMe: () => {
+                          const f = watcher.flag!;
+                          setAiOpen(true);
+                          setAutoAsk({
+                            nonce: Date.now(),
+                            intent: "mistake",
+                            text: `I wrote this step: ${f.latex}. Walk me through what's wrong with it and how to fix it. ${f.whatsWrong}`.trim(),
+                          });
+                          watcher.dismiss();
+                        },
+                        onFix: watcher.dismiss,
+                        onNotAMistake: watcher.dismissForever,
+                      }
+                    : null
+                }
               />
             </div>
           </div>
@@ -485,6 +537,7 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
             onInsertSolution={insertSolution}
             onFlushSave={flush}
             focusSignal={aiFocus}
+            autoAsk={autoAsk}
             onClose={() => setAiOpen(false)}
           />
         )}

@@ -63,6 +63,8 @@ export function AiPanel(props: {
   /** Called before every AI request so unsaved ink/objects reach the server's context builder. */
   onFlushSave: () => Promise<void>;
   focusSignal: number;
+  /** A question the workspace wants asked right away (e.g. "Show me" on a flagged step). */
+  autoAsk?: { nonce: number; text: string; intent?: Intent } | null;
   onClose: () => void;
 }) {
   const { notebookId, page, editor, textSelection } = props;
@@ -225,6 +227,15 @@ export function AiPanel(props: {
     },
     [status, editor.region, editor.selectedIds, hasSelection, page, notebookId, conversationId, textSelection, props.onFlushSave],
   );
+
+  const lastAutoAsk = useRef(0);
+  const autoAsk = props.autoAsk;
+  useEffect(() => {
+    if (!autoAsk || autoAsk.nonce === lastAutoAsk.current || !status?.configured) return;
+    lastAutoAsk.current = autoAsk.nonce;
+    void send(autoAsk.text, autoAsk.intent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAsk, status?.configured]);
 
   const stop = () => abortRef.current?.abort();
   const newChat = () => {

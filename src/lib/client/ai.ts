@@ -1,5 +1,6 @@
 import type { Answer, Verification } from "@/lib/ai/answer";
 import type { ChatMeta, ChatRequest } from "@/lib/ai/request";
+import type { WatchRequest, WatchResponse } from "@/lib/ai/watch";
 
 export interface AiStatus {
   configured: boolean;
@@ -99,4 +100,20 @@ export async function streamChat(body: ChatRequest, handlers: ChatHandlers, sign
   }
   if (!final) throw new ChatError("The answer was cut off. Please try again.", "incomplete");
   return final;
+}
+
+/** Silent "watch my work" check. Throws ChatError (with code) on failure. */
+export async function watchWork(body: WatchRequest, signal: AbortSignal): Promise<WatchResponse> {
+  let res: Response;
+  try {
+    res = await fetch("/api/ai/watch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw e;
+    throw new ChatError("Network error.", "network");
+  }
+  if (!res.ok) {
+    const j = (await res.json().catch(() => null)) as { error?: { message?: string; code?: string } } | null;
+    throw new ChatError(j?.error?.message ?? `Work tracking failed (${res.status}).`, j?.error?.code ?? "http", Number(res.headers.get("Retry-After")) || undefined);
+  }
+  return (await res.json()) as WatchResponse;
 }
