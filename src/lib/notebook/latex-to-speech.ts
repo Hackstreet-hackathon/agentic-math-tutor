@@ -5,6 +5,32 @@
 export function latexToSpeech(latex: string): string {
   let s = latex;
 
+  // Matrices: read row by row, e.g. "the matrix with row 1: 1, 2; row 2: 3, 4". vmatrix is a determinant.
+  s = s.replace(/\\begin\{(p|b|B|v|V)?matrix\}([\s\S]*?)\\end\{\1?matrix\}/g, (_m, kind: string | undefined, body: string) => {
+    const rows = body
+      .split(/\\\\/)
+      .map((r) => r.trim())
+      .filter(Boolean)
+      .map((r, i) => `row ${i + 1}: ${r.split("&").map((c) => c.trim()).join(", ")}`);
+    return `${kind === "v" || kind === "V" ? "the determinant of the matrix" : "the matrix"} with ${rows.join("; ")}; `;
+  });
+  s = s.replace(/\\det\s*/g, "determinant of ");
+  // A^T, A^{T}, A^{-1} (only after a capital letter or bracket, so x^{-1} keeps reading as a power)
+  s = s.replace(/([A-Z)\]])\^\{?\\?(?:T|top)\}?/g, "$1 transpose");
+  s = s.replace(/([A-Z)\]])\^\{-1\}/g, "$1 inverse");
+
+  // Calculus: derivatives, integrals, limits.
+  s = s.replace(/\\frac\{d\^?\{?2?\}?\s*([a-zA-Z]?)\}\{d\s*([a-zA-Z])\^?\{?2?\}?\}/g, (m, num: string, den: string) =>
+    /\^\{?2/.test(m) ? `second derivative of ${num || "the function"} with respect to ${den}` : `derivative of ${num || "the function"} with respect to ${den}`,
+  );
+  s = s.replace(/\\partial\s*/g, "partial ");
+  s = s.replace(/\\int_\{([^}]*)\}\^\{([^}]*)\}/g, "the integral from $1 to $2 of ");
+  s = s.replace(/\\int(?![a-zA-Z])/g, "the integral of ");
+  s = s.replace(/\\lim_\{([^}]*?)\s*\\(?:to|rightarrow)\s*([^}]*)\}/g, "the limit as $1 approaches $2 of ");
+  s = s.replace(/\\(?:to|rightarrow)(?![a-zA-Z])/g, "approaches");
+  s = s.replace(/\\cdot(?![a-zA-Z])/g, "times");
+  s = s.replace(/([a-zA-Z])'+/g, "$1 prime");
+
   // Fractions: \frac{a}{b} → "a over b"
   s = s.replace(/\\frac\{([^}]*)\}\{([^}]*)\}/g, "$1 over $2");
 

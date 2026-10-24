@@ -1,5 +1,5 @@
 "use client";
-import { Loader2, Mic } from "lucide-react";
+import { Loader2, Mic, MicOff } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +20,7 @@ type FlashMsg = { ok: true } | { ok: false } | null;
 export function VoiceListener({ onMathQuestion, active, onToggle }: VoiceListenerProps) {
   const [state, setState] = useState<ListenerState>("off");
   const [flash, setFlash] = useState<FlashMsg>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Refs for the audio pipeline — not state because changes should not re-render
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -51,7 +52,12 @@ export function VoiceListener({ onMathQuestion, active, onToggle }: VoiceListene
   }, []);
 
   const startLoop = useCallback(async () => {
+    setError(null);
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        // Browsers only expose the microphone on https:// or http://localhost.
+        throw new DOMException("insecure", "SecurityError");
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
@@ -171,8 +177,19 @@ export function VoiceListener({ onMathQuestion, active, onToggle }: VoiceListene
           }
         }
       }, 100);
-    } catch {
+    } catch (e) {
+      const name = (e as DOMException).name;
+      setError(
+        name === "SecurityError"
+          ? "Microphone needs https:// or http://localhost. Open the app at http://localhost:3100."
+          : name === "NotAllowedError"
+            ? "Microphone is blocked. Click the lock/site-settings icon in the address bar and allow the microphone."
+            : name === "NotFoundError"
+              ? "No microphone found."
+              : "Could not start the microphone.",
+      );
       setState("off");
+      onToggle();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onMathQuestion]);
@@ -236,6 +253,21 @@ export function VoiceListener({ onMathQuestion, active, onToggle }: VoiceListene
         )}
       >
         {flash.ok ? "✓ Sending…" : "Not a math question"}
+      </button>
+    );
+  }
+
+  if (error) {
+    return (
+      <button
+        type="button"
+        role="alert"
+        title={error}
+        onClick={() => setError(null)}
+        className="flex max-w-[11rem] items-center gap-1 rounded-lg bg-red-50 px-2 py-1 text-left text-[11px] leading-tight text-red-700"
+      >
+        <MicOff size={13} className="shrink-0" />
+        <span>{error}</span>
       </button>
     );
   }

@@ -114,3 +114,33 @@ describe("stepsToSpeech", () => {
     expect(result).toContain("Step 1: Start here");
   });
 });
+
+describe("calculus and matrices", () => {
+  it("reads a 2x2 matrix row by row", () => {
+    expect(latexToSpeech("\\begin{pmatrix}1 & 2 \\\\ 3 & 4\\end{pmatrix}")).toBe("the matrix with row 1: 1, 2; row 2: 3, 4;");
+  });
+
+  it("reads a 3x3 determinant", () => {
+    const t = latexToSpeech("\\begin{vmatrix}1&0&2\\\\0&1&3\\\\4&5&6\\end{vmatrix}");
+    expect(t).toContain("the determinant of the matrix with row 1: 1, 0, 2; row 2: 0, 1, 3; row 3: 4, 5, 6");
+  });
+
+  it("reads transpose, inverse and det", () => {
+    expect(latexToSpeech("A^T")).toBe("A transpose");
+    expect(latexToSpeech("A^{-1}")).toBe("A inverse");
+    expect(latexToSpeech("\\det(A)")).toBe("determinant of (A)");
+    expect(latexToSpeech("x^{-1}")).toBe("x to the power of -1");
+  });
+
+  it("reads derivatives", () => {
+    expect(latexToSpeech("\\frac{dy}{dx}")).toBe("derivative of y with respect to x");
+    expect(latexToSpeech("\\frac{d}{dx}")).toBe("derivative of the function with respect to x");
+    expect(latexToSpeech("f'(x)")).toBe("f prime(x)");
+  });
+
+  it("reads integrals and limits", () => {
+    expect(latexToSpeech("\\int_{0}^{1} x^2 dx")).toBe("the integral from 0 to 1 of x squared dx");
+    expect(latexToSpeech("\\int x dx + C")).toBe("the integral of x dx + C");
+    expect(latexToSpeech("\\lim_{x \\to 0} \\sin x")).toBe("the limit as x approaches 0 of sin x");
+  });
+});

@@ -1,5 +1,5 @@
 "use client";
-import { AlertTriangle, ArrowUp, Check, FilePlus2, Lightbulb, Loader2, MessageSquarePlus, PenLine, SearchCheck, Sparkles, Square, Wand2, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Check, FilePlus2, Headphones, Lightbulb, Loader2, MessageSquarePlus, PenLine, SearchCheck, Sparkles, Square, Wand2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Answer, Intent, Verification } from "@/lib/ai/answer";
 import type { ChatRequest, ContextSummary } from "@/lib/ai/request";
@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import type { EditorState } from "./editor";
 import { Latex } from "./math";
 import { MathText } from "./math-text";
+import { useConversation, type TurnPayload } from "./use-conversation";
 import { VoiceInput } from "./voice-input";
 import { VoiceListener } from "./voice-listener";
 import { VoiceOutput } from "./voice-output";
@@ -124,6 +125,62 @@ export function AiPanel(props: {
     return parts;
   }, [editor.region, editor.selectedIds.length, textSelection]);
   const hasSelection = selection.length > 0;
+
+  /* ----- what the student has circled / selected, packaged for the tutor ----- */
+  const buildSelectionPayload = useCallback((): TurnPayload => {
+    const region = editor.region;
+    const selectionIds = new Set(editor.selectedIds);
+    const hasInk = page.objects.some((o) => o.type === "INK" && selectionIds.has(o.id));
+    let image: string | null = null;
+    if (region && status?.capabilities?.vision && (page.pageType === "PDF" || hasInk)) {
+      const pdfCanvas = document.querySelector<HTMLCanvasElement>('[data-testid="pdf-background"] canvas');
+      image = captureRegionImage({ page, bounds: region.bounds, objects: page.objects, pdfCanvas });
+    }
+    const inkObjects = (page.objects as NotebookObject[]).filter((o): o is InkObject => o.type === "INK" && selectionIds.has(o.id));
+    let recognizedHandwriting: string | undefined;
+    try {
+      recognizedHandwriting = (inkObjects.length > 0 ? recognizeStrokes(inkObjects) : null)?.latex ?? undefined;
+    } catch {
+      recognizedHandwriting = undefined; // best-effort only
+    }
+    return {
+      selection: hasSelection
+        ? { region: region ? { kind: region.kind, polygon: region.polygon, bounds: region.bounds } : null, objectIds: editor.selectedIds, text: textSelection || null }
+        : null,
+      image,
+      recognizedHandwriting,
+    };
+  }, [editor.region, editor.selectedIds, hasSelection, page, status, textSelection]);
+
+  /* ----- voice conversation ----- */
+  const [convoOn, setConvoOn] = useState(false);
+  const [convoError, setConvoError] = useState<string | null>(null);
+  const [sayText, setSayText] = useState("");
+  const tutorItemId = useRef<string | null>(null);
+  const convo = useConversation({
+    active: convoOn && Boolean(status?.configured),
+    notebookId,
+    pageId: page.id,
+    conversationId,
+    onConversationId: setConversationId,
+    getPayload: async () => {
+      await props.onFlushSave();
+      return buildSelectionPayload();
+    },
+    onUser: (text) => {
+      setConvoError(null);
+      setItems((prev) => [...prev, { id: nextId(), role: "user", text }]);
+    },
+    onTutorStart: () => {
+      const id = nextId();
+      tutorItemId.current = id;
+      setItems((prev) => [...prev, { id, role: "assistant", pending: true, answer: emptyAnswer("followup"), sourceQuestion: "", region: editor.region?.bounds ?? null }]);
+    },
+    onTutorText: (text) => setItems((prev) => prev.map((it) => (it.id === tutorItemId.current && it.role === "assistant" ? { ...it, answer: { ...it.answer, summary: text } } : it))),
+    onTutorDone: () => setItems((prev) => prev.map((it) => (it.id === tutorItemId.current && it.role === "assistant" ? { ...it, pending: false } : it))),
+    onError: (message) => setConvoError(message),
+    onStopListening: () => setConvoOn(false),
+  });
 
   /* ----- sending ----- */
   const send = useCallback(
@@ -256,6 +313,22 @@ export function AiPanel(props: {
           <p className="text-sm font-semibold leading-tight">AI tutor</p>
           {status?.configured && <p className="truncate text-[11px] leading-tight text-muted">{status.model}</p>}
         </div>
+        {status?.configured && (
+          <button
+            data-testid="convo-toggle"
+            aria-pressed={convoOn}
+            aria-label={convoOn ? "Stop voice conversation" : "Start voice conversation"}
+            title={convoOn ? "Stop voice conversation" : "Talk with the tutor (always listening)"}
+            onClick={() => {
+              setConvoError(null);
+              setConvoOn((v) => !v);
+            }}
+            className={cn("flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium", convoOn ? "bg-accent text-white" : "hover:bg-black/5")}
+          >
+            <Headphones size={15} />
+            {convoOn ? "Talking" : "Talk"}
+          </button>
+        )}
         <button aria-label="New conversation" title="New conversation" onClick={newChat} disabled={items.length === 0} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-black/5 disabled:opacity-30">
           <MessageSquarePlus size={16} />
         </button>
@@ -329,6 +402,32 @@ export function AiPanel(props: {
             </button>
           ))}
         </div>
+        {convoOn && (
+          <div data-testid="convo-bar" className="mb-2 rounded-xl bg-accent-soft px-3 py-2 text-xs text-accent">
+            <div className="flex items-center gap-2">
+              <span data-testid="convo-state" className="font-medium">
+                {{ off: "Starting…", listening: "Listening — just talk", hearing: "Hearing you…", transcribing: "Got it…", thinking: "Thinking…", speaking: "Speaking — talk to interrupt" }[convo.state]}
+              </span>
+              <span className="ml-auto truncate text-accent/80" title="The tutor sees what you have circled or selected">
+                {hasSelection ? `Using: ${selection.join(", ")}` : "Circle an equation to ask about it"}
+              </span>
+            </div>
+            {convoError && <p role="alert" className="mt-1 text-red-700">{convoError}</p>}
+            <input
+              data-testid="convo-say"
+              value={sayText}
+              onChange={(e) => setSayText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  convo.say(sayText);
+                  setSayText("");
+                }
+              }}
+              placeholder="…or type what you would say"
+              className="mt-1.5 w-full rounded-lg border border-accent/20 bg-white px-2 py-1 text-xs text-ink outline-none placeholder:text-muted"
+            />
+          </div>
+        )}
         <form
           className="flex items-end gap-2"
           onSubmit={(e) => {
@@ -336,14 +435,14 @@ export function AiPanel(props: {
             void send(input);
           }}
         >
-          <VoiceListener
+          {!convoOn && <VoiceListener
             active={voiceActive}
             onToggle={() => setVoiceActive((v) => !v)}
             onMathQuestion={(text) => {
               setInput(text);
               void send(text);
             }}
-          />
+          />}
           <textarea
             ref={inputRef}
             data-testid="ai-input"
@@ -504,11 +603,12 @@ function AnswerCard({
       {a.mistake && (
         <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-red-950 ring-1 ring-red-200" data-testid="mistake">
           <p className="font-medium">{a.mistake.stepIndex ? `Check step ${a.mistake.stepIndex}` : "Possible mistake"}</p>
-          <p><MathText text={a.mistake.description} /></p>
+          <p className="whitespace-normal break-words"><MathText text={a.mistake.description} /></p>
           {a.mistake.correction && (
-            <div className="mt-1 text-green-900">
-              Try: <Latex latex={a.mistake.correction} />
-            </div>
+            <p className="mt-1 whitespace-normal break-words text-green-900">
+              <span className="font-medium">Try: </span>
+              <MathText text={a.mistake.correction} />
+            </p>
           )}
         </div>
       )}

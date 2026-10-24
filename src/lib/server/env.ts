@@ -32,11 +32,20 @@ const schema = z.object({
   /** Requests per user per minute on expensive AI endpoints. */
   AI_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).max(10_000).default(20),
 
-  STT_PROVIDER: z.enum(["groq", "gradium", "none"]).default("none"),
+  STT_PROVIDER: z.enum(["openai", "groq", "gradium", "none"]).default("none"),
   TTS_PROVIDER: z.enum(["openai", "gradium", "none"]).default("none"),
   OPENAI_TTS_MODEL: optionalString,
   OPENAI_TTS_VOICE: optionalString,
   GRADIUM_API_KEY: optionalString,
+
+  /** Fast model for voice-conversation triage and small talk (free options: groq, gemini). */
+  FAST_LLM_PROVIDER: z.enum(["openai", "groq", "gemini", "none"]).default("openai"),
+  FAST_LLM_MODEL: optionalString,
+  GEMINI_API_KEY: optionalString,
+  /** Laya (ConvAI) System One classifier key; reserved for the voice triage step. */
+  LAYA_API_KEY: optionalString,
+  /** Speaking style for gpt-4o-mini-tts, e.g. "warm, encouraging teacher". */
+  OPENAI_TTS_STYLE: optionalString,
 
   MATH_SERVICE_URL: optionalString,
 

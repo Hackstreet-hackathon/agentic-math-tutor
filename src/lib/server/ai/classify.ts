@@ -6,7 +6,7 @@ export interface ClassifyResult {
 }
 
 /**
- * Uses Groq Llama (free tier) to determine whether a transcription is a
+ * Uses gpt-4o-mini (OpenAI) or Groq Llama to determine whether a transcription is a
  * math / science question.  Falls back to optimistic "let it through" when
  * no API key is present.
  */
@@ -16,20 +16,24 @@ export async function classifyQuestion(
 ): Promise<ClassifyResult> {
   const e = env();
 
-  // No key or STT disabled → optimistic default so the user still gets answers
-  if (!e.GROQ_API_KEY || e.STT_PROVIDER === "none") {
+  // Same provider as speech-to-text. No key or STT disabled → optimistic default so the user still gets answers.
+  const openai = e.STT_PROVIDER === "openai";
+  const apiKey = openai ? e.OPENAI_API_KEY : e.GROQ_API_KEY;
+  if (!apiKey || e.STT_PROVIDER === "none") {
     return { isMathQuestion: true, confidence: "low" };
   }
+  const url = openai ? `${e.OPENAI_BASE_URL ?? "https://api.openai.com/v1"}/chat/completions` : "https://api.groq.com/openai/v1/chat/completions";
+  const model = openai ? "gpt-4o-mini" : "llama-3.1-8b-instant";
 
   try {
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    const res = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${e.GROQ_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
+        model,
         messages: [
           {
             role: "system",

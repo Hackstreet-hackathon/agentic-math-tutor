@@ -1,9 +1,9 @@
 "use client";
-import { Eye, EyeOff, Loader2, Volume2, VolumeX } from "lucide-react";
+import { Eye, EyeOff, Lightbulb, Loader2, Volume2, VolumeX } from "lucide-react";
 import { useState } from "react";
-import type { WatchFlag } from "@/lib/ai/watch";
+import { speak } from "@/lib/client/speak";
 import { cn } from "@/lib/utils";
-import type { WatchState } from "./use-work-watcher";
+import type { FlagView, WatchState } from "./use-work-watcher";
 
 const LABEL: Record<WatchState, string> = {
   off: "Watch my work",
@@ -45,7 +45,7 @@ export function WatchToggle({ enabled, onToggle, voice, onToggleVoice, state }: 
   );
 }
 
-/** Wavy underline under the wrong line, with a tappable marker that opens the nudge. Rendered above the page, never saved. */
+/** Wavy underline under the wrong line only (like a spelling mistake), with a tappable marker that opens the nudge. Never saved. */
 export function FlagOverlay({
   flag,
   zoom,
@@ -54,7 +54,7 @@ export function FlagOverlay({
   onFix,
   onNotAMistake,
 }: {
-  flag: WatchFlag;
+  flag: FlagView;
   zoom: number;
   pageWidth: number;
   onShowMe: () => void;
@@ -62,32 +62,48 @@ export function FlagOverlay({
   onNotAMistake: () => void;
 }) {
   const [open, setOpen] = useState(true);
-  const y = flag.y * zoom;
+  const [hint, setHint] = useState(false);
+  const r = flag.rect;
+  const left = Math.max(0, r.x - 4) * zoom;
+  const width = (r.width + 8) * zoom;
+  const underlineY = (r.y + r.height + 2) * zoom;
+  const cardLeft = Math.min(left, Math.max(0, pageWidth * zoom - 296));
   return (
     <div className="pointer-events-none absolute left-0 top-0 z-20" style={{ width: pageWidth * zoom }}>
-      <svg className="absolute left-0" style={{ top: y - 3 }} width={pageWidth * zoom} height="8" aria-hidden="true">
+      <svg data-testid="watch-underline" className="absolute" style={{ left, top: underlineY - 2 }} width={width} height="6" aria-hidden="true">
         <defs>
-          <pattern id="wavy" width="8" height="8" patternUnits="userSpaceOnUse">
-            <path d="M0 4 Q2 0 4 4 T8 4" fill="none" stroke="#dc2626" strokeWidth="1.5" />
+          <pattern id="wavy" width="6" height="6" patternUnits="userSpaceOnUse">
+            <path d="M0 3 Q1.5 0 3 3 T6 3" fill="none" stroke="#dc2626" strokeWidth="1.4" />
           </pattern>
         </defs>
-        <rect x="40" y="0" width={Math.max(0, pageWidth * zoom - 80)} height="8" fill="url(#wavy)" opacity="0.8" />
+        <rect x="0" y="0" width={width} height="6" fill="url(#wavy)" />
       </svg>
       <button
         type="button"
         data-testid="watch-flag"
         aria-label="Something looks off in this step"
         onClick={() => setOpen((o) => !o)}
-        className="pointer-events-auto absolute grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full bg-red-600 text-xs font-bold text-white shadow animate-pulse"
-        style={{ left: 8, top: y }}
+        className="pointer-events-auto absolute grid h-5 w-5 place-items-center rounded-full bg-red-600 text-[11px] font-bold text-white shadow animate-pulse"
+        style={{ left: Math.max(2, left - 24), top: underlineY - 18 }}
       >
         !
       </button>
       {open && (
-        <div className="pointer-events-auto absolute w-72 rounded-xl border border-red-200 bg-white p-3 text-sm shadow-lg" style={{ left: 40, top: y + 10 }} role="status">
+        <div className="pointer-events-auto absolute w-72 rounded-xl border border-red-200 bg-white p-3 text-sm shadow-lg" style={{ left: cardLeft, top: underlineY + 8 }} role="status">
           <p className="font-medium text-red-700">Hmm, take another look at this step</p>
-          <p className="mt-1 text-ink">{flag.nudge}</p>
+          {hint && <p data-testid="watch-hint" className="mt-1 text-ink">{flag.nudge}</p>}
           <div className="mt-2 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              data-testid="watch-hint-btn"
+              onClick={() => {
+                setHint(true);
+                void speak(flag.nudge);
+              }}
+              className="flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100"
+            >
+              <Lightbulb size={12} /> Hint
+            </button>
             <button type="button" onClick={onShowMe} className="rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-white hover:bg-accent/90">Show me</button>
             <button type="button" onClick={onFix} className="rounded-lg px-2.5 py-1 text-xs font-medium hover:bg-black/5">I’ll fix it</button>
             <button type="button" onClick={onNotAMistake} className="rounded-lg px-2.5 py-1 text-xs text-muted hover:bg-black/5">Not a mistake</button>

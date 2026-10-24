@@ -8,6 +8,34 @@ import { speak, isSpeaking } from "@/lib/client/speak";
 import { unionRects, boundsOf, type Rect } from "@/lib/notebook/geometry";
 import type { NotebookObject } from "@/lib/notebook/schemas";
 
+/** A flag plus the page-unit box of the wrong line, so the underline sits under that line only. */
+export type FlagView = WatchFlag & { rect: Rect };
+
+const PRAISE = [
+  "Nice catch! You fixed it.",
+  "That's it! Good job spotting and correcting that.",
+  "Yes! That step looks right now. Well done.",
+  "Brilliant, you found the mistake and fixed it yourself.",
+  "Look at that, all corrected! Great work.",
+];
+
+/** Box around the line the model flagged: the student objects crossing its y, or the nearest one. */
+export function lineRect(work: NotebookObject[], y: number, pageWidth: number): Rect {
+  const crossing = work.filter((o) => o.y - 6 <= y && y <= o.y + o.height + 6);
+  const near =
+    crossing.length > 0
+      ? crossing
+      : [...work]
+          .map((o) => ({ o, d: Math.abs(o.y + o.height / 2 - y) }))
+          .filter((c) => c.d < 80)
+          .sort((a, b) => a.d - b.d)
+          .slice(0, 1)
+          .map((c) => c.o);
+  const u = unionRects(near.map(boundsOf));
+  if (!u) return { x: 40, y: y - 10, width: Math.min(240, pageWidth - 80), height: 20 };
+  return u;
+}
+
 export type WatchState = "off" | "idle" | "checking" | "ok" | "flagged" | "unsure" | "needs-vision" | "paused" | "unavailable";
 
 export const PAUSE_MS = 2500;
@@ -47,7 +75,7 @@ const key = (pageId: string, latex: string) => `${pageId}::${latex.replace(/\s+/
 export function useWorkWatcher(opts: { enabled: boolean; voice: boolean; notebookId: string; page: PageDto | undefined }) {
   const { enabled, voice, notebookId, page } = opts;
   const [state, setState] = useState<WatchState>("off");
-  const [flag, setFlag] = useState<{ pageId: string; flag: WatchFlag } | null>(null);
+  const [flag, setFlag] = useState<{ pageId: string; flag: FlagView } | null>(null);
   const [vision, setVision] = useState<boolean | null>(null);
   const ignored = useRef<Map<string, string[]>>(new Map());
   const lastSig = useRef<Map<string, string>>(new Map());
@@ -55,6 +83,8 @@ export function useWorkWatcher(opts: { enabled: boolean; voice: boolean; noteboo
   const spoken = useRef<{ keys: Set<string>; at: number }>({ keys: new Set(), at: 0 });
   const abort = useRef<AbortController | null>(null);
   const pauseUntil = useRef(0);
+  /** A step that was flagged and has not been confirmed fixed yet. */
+  const awaiting = useRef<{ pageId: string; latex: string } | null>(null);
 
   const voiceRef = useRef(voice);
   useEffect(() => {
@@ -138,12 +168,21 @@ export function useWorkWatcher(opts: { enabled: boolean; voice: boolean; noteboo
         );
         lastSig.current.set(pageId, sig);
         if (r.flag) {
-          setFlag({ pageId, flag: r.flag });
+          setFlag({ pageId, flag: { ...r.flag, rect: lineRect(work, r.flag.y, page.width) } });
+          awaiting.current = { pageId, latex: r.flag.latex };
           setState("flagged");
           maybeSpeak(r.flag, pageId);
         } else {
           setFlag(null);
           setState(r.status === "ok" ? "ok" : r.status === "unsure" ? "unsure" : "idle");
+          // The student fixed the step they were nudged about: say so.
+          if (r.status === "ok" && awaiting.current?.pageId === pageId) {
+            awaiting.current = null;
+            if (voiceRef.current) {
+              spoken.current.at = Date.now();
+              void speak(PRAISE[Math.floor(Math.random() * PRAISE.length)]!);
+            }
+          }
         }
       } catch (e) {
         if ((e as Error).name === "AbortError") return;
@@ -162,6 +201,7 @@ export function useWorkWatcher(opts: { enabled: boolean; voice: boolean; noteboo
   const dismissForever = () => {
     if (!flag) return;
     ignored.current.set(flag.pageId, [...(ignored.current.get(flag.pageId) ?? []), flag.flag.latex]);
+    awaiting.current = null;
     setFlag(null);
     setState("idle");
   };

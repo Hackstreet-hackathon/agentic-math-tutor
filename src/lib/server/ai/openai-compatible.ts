@@ -1,7 +1,7 @@
 import { ProviderError, type LLMCapabilities, type LLMMessage, type LLMProvider, type LLMRequest, type LLMResult, type LLMStreamEvent, type ResponseFormat } from "./types";
 
 export interface OpenAICompatibleConfig {
-  id: "openai" | "groq";
+  id: "openai" | "groq" | "gemini";
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -18,7 +18,7 @@ export interface OpenAICompatibleConfig {
  * Error messages are safe to show to students; keys and bodies are never included.
  */
 export class OpenAICompatibleProvider implements LLMProvider {
-  readonly id: "openai" | "groq";
+  readonly id: "openai" | "groq" | "gemini";
   readonly model: string;
   readonly capabilities: LLMCapabilities;
   private cfg: OpenAICompatibleConfig;

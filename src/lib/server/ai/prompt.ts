@@ -12,11 +12,17 @@ RULES
 4. You cannot run software. Do not say you have verified or computed anything with a tool; the app shows verification separately. Explain your reasoning so it can be checked.
 5. Be concise, warm and age-appropriate. Prefer short steps. Do not do more than was asked.
 
+SUBJECT SCOPE
+You teach school and early-university maths, including basic calculus and matrices:
+- Calculus: limits; derivatives (power, product, quotient and chain rules; trig, exponential and log functions) and basic applications (tangents, maxima/minima, rates); indefinite and definite integrals (power rule, substitution, simple trig/exponential, area under a curve). Name the rule used in each step. Indefinite integrals need "+ C".
+- Matrices up to 3x3: addition, subtraction, scalar multiplication, matrix multiplication (check the dimensions first; row-by-column), transpose, determinant (2x2 and 3x3 by cofactor expansion), inverse (2x2 formula; 3x3 via cofactors/adjugate, only when the determinant is non-zero) and solving linear systems with matrices. Show the working for each entry of a product or cofactor.
+- Write a matrix in LaTeX as \\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix} (determinants with vmatrix) and a derivative as \\frac{d}{dx}. A whole matrix is one "latex" value; a matrix equation is one step.
+
 BEHAVIOUR BY INTENT
 - solve: complete numbered steps (latex + one-sentence reason each), then finalAnswer.
 - hint: give ONE nudge in "hint" without the final answer or full solution; leave steps empty.
 - check: restate what you read of the student's work, find the FIRST incorrect step (show why, e.g. by expanding or substituting), put it in "mistake" with a correction, and praise correct steps briefly. If handwriting or the image is unclear, say what you could not read and ask them to confirm instead of calling it wrong.
-- mistake: explain the exact error and how to fix it.
+- mistake: explain the exact error and how to fix it. In "mistake", "description" and "correction" are plain sentences with spaces (never a bare LaTeX string); put maths inside $...$.
 - explain / simplify / summarize / diagram / followup / general: answer in "summary" (use steps only if a sequence helps).
 - graph: describe key features and put the functions in graphExpressions (e.g. "y=x^2-4").
 - insert: provide the clean solution in steps so it can be written onto the page.
@@ -42,21 +48,16 @@ export interface HistoryTurn {
   text: string;
 }
 
-export function buildMessages(opts: {
-  ctx: AgentContext;
-  intent: Intent;
-  message: string;
-  history: HistoryTurn[];
-  imageDataUrl: string | null;
-  visionAvailable: boolean;
-}): { messages: LLMMessage[]; boundary: string } {
-  const { ctx, intent, message, history, imageDataUrl, visionAvailable } = opts;
-  const boundary = randomBytes(8).toString("hex");
+/**
+ * The trusted page description plus the untrusted document context (selected text, objects, handwriting,
+ * references), fenced with a random boundary. Shared by the structured tutor and the voice conversation.
+ */
+export function renderContext(opts: { ctx: AgentContext; imageDataUrl: string | null; visionAvailable: boolean; boundary: string; leading?: string[] }): string {
+  const { ctx, imageDataUrl, visionAvailable, boundary } = opts;
   const n = (t: string) => neutralize(t, boundary);
 
   const trusted: string[] = [
-    `<intent>${intent}</intent>`,
-    `<student_message>${message.replaceAll("<", "‹")}</student_message>`,
+    ...(opts.leading ?? []),
     `<page number="${ctx.page.number}" of="${ctx.page.total}" type="${ctx.page.type}"${ctx.page.documentName ? ` document="${ctx.page.documentName.replace(/["<>]/g, "")}"` : ""}${ctx.page.pdfPage ? ` pdf_page="${ctx.page.pdfPage}"` : ""}/>`,
   ];
   if (ctx.region) trusted.push(`The student circled/boxed a region of this page${ctx.selectedText || ctx.selectedObjects.length ? "" : " (nothing readable was found under it)"}.`);
@@ -87,6 +88,27 @@ export function buildMessages(opts: {
     ...trusted,
     untrusted.length ? `BEGIN_UNTRUSTED_CONTEXT ${boundary}\n${untrusted.join("\n")}\nEND_UNTRUSTED_CONTEXT ${boundary}` : "No document or notebook text was found for this request.",
   ].join("\n");
+
+  return text;
+}
+
+export function buildMessages(opts: {
+  ctx: AgentContext;
+  intent: Intent;
+  message: string;
+  history: HistoryTurn[];
+  imageDataUrl: string | null;
+  visionAvailable: boolean;
+}): { messages: LLMMessage[]; boundary: string } {
+  const { ctx, intent, message, history, imageDataUrl, visionAvailable } = opts;
+  const boundary = randomBytes(8).toString("hex");
+  const text = renderContext({
+    ctx,
+    imageDataUrl,
+    visionAvailable,
+    boundary,
+    leading: [`<intent>${intent}</intent>`, `<student_message>${message.replaceAll("<", "‹")}</student_message>`],
+  });
 
   const userContent: LLMMessage["content"] = imageDataUrl && visionAvailable ? [{ type: "text", text }, { type: "image", dataUrl: imageDataUrl }] : text;
 

@@ -20,11 +20,17 @@ const SYSTEM = `You silently watch a student solve a maths problem in their note
 You get: the problem area as an image (the student's handwriting, possibly over a printed PDF page) and/or typed lines, plus text extracted from the page.
 
 TASK
+0. First, in "scratchpad" (terse, for yourself): redo each of the student's steps independently from the previous line, computing every number and every matrix/derivative/integral entry yourself, and note whether your result equals the student's. Do this BEFORE deciding any status. Mark a step "wrong" only if your own recomputation disagrees with it; if they agree, it is "ok".
 1. Identify the problem being solved ("problem"). It may be printed in the PDF or written/typed by the student at the top.
 2. Transcribe each line of the STUDENT'S working, top to bottom, as LaTeX in "steps" (exclude the problem statement itself). "y" is the line's vertical position inside the image, 0 = top edge, 1 = bottom edge.
 3. For each step set "status": "ok" if it follows validly from the previous line (or the problem), "wrong" if it contains a mathematical error (arithmetic, sign, algebra, wrong rule, wrong transcription of the problem), "unclear" if you cannot read it confidently.
 4. Set "firstWrongStep" to the index of the first "wrong" step, else null. Only the first wrong step matters: later steps that are wrong only because of it are not new mistakes.
 5. If a step is wrong: "whatsWrong" = one factual sentence (for the system, may name the error). "nudge" = a short Socratic hint (1-2 sentences, friendly) that points at WHERE to look or WHAT to re-check, never the corrected line or the final answer. "voiceLine" = a very short playful, kind remark to be spoken aloud (max 15 words, light humour, e.g. teasing a suspicious sign), never revealing the answer. Otherwise these three are null.
+
+SUBJECT SCOPE
+You also check basic calculus and matrices up to 3x3.
+- Calculus: verify limits, derivatives (power, product, quotient, chain rule; trig/exp/log) and integrals (power rule, substitution, definite integrals with limits evaluated). A missing "+ C" on an indefinite integral, a wrong sign in a derivative of sin/cos, or a forgotten chain-rule factor is a mistake.
+- Matrices: check dimensions before products, entry-by-entry arithmetic in sums and products (row-by-column), transpose, determinant (cofactor signs + - +) and inverse (adjugate, divide by the determinant). Transcribe a whole matrix, or a matrix equation, as ONE step in LaTeX (\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}) and judge each entry.
 
 RULES
 - Be conservative. A different but valid method is NOT wrong. Incomplete work (the student is still in the middle) is NOT wrong. If you are not sure you read a line correctly, mark it "unclear" and set confidence "low".
@@ -78,7 +84,7 @@ export async function runWatch(opts: { userId: string; body: WatchRequest; provi
     const r = await provider.generate({
       messages: [{ role: "system", content: SYSTEM }, { role: "user", content }],
       temperature: 0,
-      maxOutputTokens: 900,
+      maxOutputTokens: 1800,
       responseFormat: "json_schema",
       jsonSchema: { name: "work_check", schema: WATCH_JSON_SCHEMA as unknown as Record<string, unknown> },
       signal,

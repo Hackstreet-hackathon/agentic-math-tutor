@@ -104,6 +104,12 @@ The fake LLM returns structured answers and echoes the request so you can inspec
 
 Turn on **Watch my work** in the top bar and the tutor reads your working as you write (handwriting via a vision model, or typed text/equations). A couple of seconds after you stop, it checks each step; if one is wrong it underlines it on the page with a small hint (no answer given). **Show me** asks the tutor for the full correction, **I'll fix it** dismisses until you change the work, **Not a mistake** stops flagging that step. The speaker button enables a short spoken, light-hearted hint (at most one per 45 s). Handwriting needs a vision-capable model (e.g. `gpt-4o`); checks are AI-judged, and unreadable or low-confidence work is never flagged. Uses `POST /api/ai/watch` (30 requests/min per user).
 
+### Voice conversation
+
+Open the AI panel and press **Talk**. The tutor listens continuously (voice-activity detection → Whisper), answers by voice, and interrupts itself if you start talking. Whatever you have circled/selected is sent with every turn, so "how do I solve this?" or "what rule do I use here?" refers to it. For maths the tutor gives one hint, asks one check question, listens to your answer and adapts (after three misses it explains). Chat and small talk are answered by a fast model; maths goes to the main model, with a short spoken acknowledgement while it thinks.
+
+Needs `STT_PROVIDER=openai` and `TTS_PROVIDER=openai`. The fast model is set with `FAST_LLM_PROVIDER` (`openai` → gpt-4o-mini by default, or free `groq` / `gemini` with their API keys) and `FAST_LLM_MODEL`. The microphone only works on `https://` or `http://localhost`.
+
 ### Known limitations of the AI tutor
 
 - Answers are labelled **"AI-generated · not verified"**. The UI never shows "Verified" unless deterministic SymPy verification succeeds (Phase 4).

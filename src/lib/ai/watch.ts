@@ -21,6 +21,8 @@ export const watchRequestSchema = z.object({
 export type WatchRequest = z.infer<typeof watchRequestSchema>;
 
 export const watchModelSchema = z.object({
+  /** The model recomputes each step here before judging; never shown to the student. */
+  scratchpad: z.string().max(4000).catch(""),
   problem: z.string().max(1500).nullable().catch(null),
   steps: z
     .array(
@@ -44,8 +46,9 @@ export type WatchModelResult = z.infer<typeof watchModelSchema>;
 export const WATCH_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["problem", "steps", "firstWrongStep", "whatsWrong", "nudge", "voiceLine", "confidence"],
+  required: ["scratchpad", "problem", "steps", "firstWrongStep", "whatsWrong", "nudge", "voiceLine", "confidence"],
   properties: {
+    scratchpad: { type: "string" },
     problem: { type: ["string", "null"] },
     steps: {
       type: "array",

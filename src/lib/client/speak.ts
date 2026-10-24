@@ -9,8 +9,10 @@ export function stopSpeaking() {
   current?.stop();
 }
 
+import { isConversationSpeaking } from "./speech-state";
+
 export async function speak(text: string): Promise<void> {
-  if (!text.trim() || typeof window === "undefined") return;
+  if (!text.trim() || typeof window === "undefined" || isConversationSpeaking()) return;
   stopSpeaking();
 
   const fallback = () => {

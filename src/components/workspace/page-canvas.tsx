@@ -10,7 +10,7 @@ import { InteractionLayer, type Preview } from "./interaction-layer";
 import { ObjectsLayer } from "./objects-layer";
 import { PdfPageBackground } from "./pdf-page-background";
 import { FlagOverlay } from "./watch-card";
-import type { WatchFlag } from "@/lib/ai/watch";
+import type { FlagView } from "./use-work-watcher";
 
 // Konva touches `window`/canvas at import time, so it is client-only.
 const InkStage = dynamic(() => import("./ink-stage"), { ssr: false });
@@ -27,7 +27,7 @@ interface Props {
   onDeleteSelection: () => void;
   onAskAi?: () => void;
   onMeasure?: (id: string, height: number) => void;
-  watchFlag?: { flag: WatchFlag; onShowMe: () => void; onFix: () => void; onNotAMistake: () => void } | null;
+  watchFlag?: { flag: FlagView; onShowMe: () => void; onFix: () => void; onNotAMistake: () => void } | null;
 }
 
 /**

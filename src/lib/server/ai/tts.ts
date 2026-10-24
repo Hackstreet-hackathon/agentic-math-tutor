@@ -21,6 +21,8 @@ export async function synthesizeSpeech(
           model: env().OPENAI_TTS_MODEL ?? "tts-1",
           voice: env().OPENAI_TTS_VOICE ?? "alloy",
           input: text,
+          // Only the gpt-4o-*-tts models accept speaking-style instructions.
+          ...(env().OPENAI_TTS_STYLE && /gpt-4o/.test(env().OPENAI_TTS_MODEL ?? "") ? { instructions: env().OPENAI_TTS_STYLE } : {}),
         }),
         signal,
       });
