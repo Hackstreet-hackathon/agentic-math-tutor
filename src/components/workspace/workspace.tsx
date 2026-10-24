@@ -14,6 +14,7 @@ import { newId } from "@/lib/utils";
 import { initialEditor, MAX_ZOOM, MIN_ZOOM, type EditorState } from "./editor";
 import { AiPanel, type InsertRequest } from "./ai-panel";
 import { GraphPanel } from "./graph-panel";
+import { markFreshSolution } from "./objects-layer";
 import { PageCanvas } from "./page-canvas";
 import { Sidebar } from "./sidebar";
 import { DrawingToolbar, TOOL_SHORTCUTS } from "./toolbar";
@@ -119,6 +120,8 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
   /** Write an AI answer onto the page as an editable, movable, undoable object, in free space. */
   const insertSolution = async (req: InsertRequest): Promise<boolean> => {
     if (!page) return false;
+    // The answer may be inserted automatically and again by the button: write it once.
+    if (req.messageId && page.objects.some((o) => o.type === "AI_SOLUTION" && o.data.messageId === req.messageId)) return true;
     const steps = req.answer.steps.filter((s) => s.latex || s.explanation).map((s) => ({ latex: s.latex ?? "", explanation: s.explanation }));
     const data: AiSolutionObject["data"] = {
       title: "Solution",
@@ -135,6 +138,7 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
     const obstacles = [...page.objects.map(boundsOf), ...(page.pageType === "PDF" ? measurePdfObstacles(page) : [])];
     const spot = findFreeSpot({ page, obstacles, anchor, size: { width, height } });
 
+    const writeMs = steps.reduce((n, st) => n + Math.min(2200, 450 + (st.latex.length + st.explanation.length) * 35) + 250, 0);
     const make = (x: number, y: number, zIndex: number): AiSolutionObject => ({
       id: newId(), type: "AI_SOLUTION", source: "AI", x, y, width, height, rotation: 0, zIndex, linkedToId: null, metadata: null, data,
     });
@@ -142,6 +146,7 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
     try {
       if (spot.kind === "free") {
         const obj = make(spot.x, spot.y, z);
+        markFreshSolution(obj.id, writeMs);
         dispatch({ type: "commit", pageId: page.id, changes: [{ before: null, after: obj }] });
         setEditor((e) => ({ ...e, tool: "select", selectedIds: [obj.id], region: null }));
       } else {
@@ -149,6 +154,7 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
         const { page: fresh } = await api.addPage(notebook.id, { afterPosition: page.position });
         dispatch({ type: "pageAdded", page: fresh });
         const obj = make(36, 36, 1);
+        markFreshSolution(obj.id, writeMs);
         dispatch({ type: "commit", pageId: fresh.id, changes: [{ before: null, after: obj }] });
         setEditor((e) => ({ ...e, tool: "select", selectedIds: [obj.id], region: null, editing: null }));
         showError("There wasn’t enough free space here, so the solution was written on a new page.");

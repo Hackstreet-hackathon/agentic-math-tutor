@@ -1,7 +1,6 @@
 "use client";
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useLayoutEffect, useMemo, useRef } from "react";
 import type { EquationObject, GraphObject, NotebookObject } from "@/lib/notebook/schemas";
-import { InkAnimator } from "./ink-animator";
 import { GraphCard } from "./graph-panel";
 import { Latex } from "./math";
 import { MathText } from "./math-text";
@@ -14,17 +13,23 @@ const VERIFY_LABEL: Record<string, { text: string; tone: string }> = {
   UNSUPPORTED: { text: "Not verified", tone: "text-muted" },
 };
 
-/** AI-written solution card: deliberately distinct from the student's own ink and text. */
+/** Solutions inserted in this session that should be "written" once; cleared after the animation so remounts show them instantly. */
+const freshSolutions = new Set<string>();
+export function markFreshSolution(id: string, ms: number) {
+  freshSolutions.add(id);
+  setTimeout(() => freshSolutions.delete(id), ms + 500);
+}
+
+const msFor = (text: string) => Math.min(2200, 450 + text.length * 35);
+const PAUSE_MS = 250;
+
+/** AI-written solution: handwriting-styled, written step by step, and it stays on the page. */
 function SolutionCard({
   o,
   onMeasure,
-  animating,
-  onAnimationDone,
 }: {
   o: Extract<NotebookObject, { type: "AI_SOLUTION" }>;
   onMeasure?: (id: string, height: number) => void;
-  animating?: boolean;
-  onAnimationDone?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -32,42 +37,46 @@ function SolutionCard({
     if (h && Math.abs(h - o.height) > 2) onMeasure?.(o.id, h);
   });
   const v = VERIFY_LABEL[o.data.verificationStatus] ?? VERIFY_LABEL.PENDING!;
-  const animText = o.data.finalAnswer ?? o.data.steps[0]?.latex ?? "";
-  const animColor = o.data.verificationStatus === "VERIFIED" ? "#16a34a" : "#1e40af";
+  const ink = o.data.verificationStatus === "VERIFIED" ? "#15803d" : "#1e40af";
+  const fresh = freshSolutions.has(o.id);
+
+  // Each line starts when the previous one has finished being written.
+  const lines = [
+    ...o.data.steps.flatMap((s) => [s.latex, s.explanation]),
+    o.data.finalAnswer ?? "",
+  ].filter(Boolean);
+  const delays = new Map<string, string>();
+  lines.reduce((acc, text) => {
+    delays.set(text, `${acc}`);
+    return acc + msFor(text) + PAUSE_MS;
+  }, 0);
+  const line = (text: string): React.CSSProperties | undefined =>
+    fresh ? ({ "--write-delay": `${delays.get(text) ?? 0}ms`, "--write-ms": `${msFor(text)}ms` } as React.CSSProperties) : undefined;
+  const cls = fresh ? "ink-write" : undefined;
+
   return (
     <div
       ref={ref}
       data-testid="ai-solution"
-      style={{ position: "absolute", left: o.x, top: o.y, width: o.width }}
-      className="relative rounded-lg border-l-4 border-accent bg-[#eef1ff]/80 px-3 py-2 text-[13px] leading-snug text-ink shadow-sm"
+      style={{ position: "absolute", left: o.x, top: o.y, width: o.width, color: ink }}
+      className="handwritten relative rounded-lg border-l-4 border-accent bg-[#eef1ff]/60 px-3 py-2 text-[19px] leading-snug shadow-sm"
     >
-      {animating && animText && (
-        <InkAnimator
-          text={animText}
-          width={o.width - 24}
-          height={Math.min(80, o.height)}
-          color={animColor}
-          onDone={onAnimationDone}
-          className="absolute inset-x-0 top-0 pointer-events-none z-10"
-        />
-      )}
-      <div className="mb-1.5 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-accent">
+      <div className="mb-1 flex items-center gap-2 font-sans text-[11px] font-medium uppercase tracking-wide text-accent">
         <span>AI solution</span>
         <span className={`rounded bg-white/80 px-1.5 py-0.5 normal-case tracking-normal ${v.tone}`}>{v.text}</span>
       </div>
-      {o.data.title && o.data.title !== "Solution" && <div className="mb-1 font-medium"><MathText text={o.data.title} /></div>}
       <ol className="space-y-1.5">
         {o.data.steps.map((s, i) => (
           <li key={i}>
-            {s.latex && <div className="overflow-x-auto text-[17px]"><Latex latex={s.latex} /></div>}
-            {s.explanation && <div className="text-muted"><MathText text={s.explanation} /></div>}
+            {s.latex && <div className={`overflow-x-auto text-[24px] ${cls ?? ""}`} style={line(s.latex)}><Latex latex={s.latex} /></div>}
+            {s.explanation && <div className={`opacity-80 ${cls ?? ""}`} style={line(s.explanation)}><MathText text={s.explanation} /></div>}
           </li>
         ))}
       </ol>
       {o.data.finalAnswer && (
-        <div className="mt-2 rounded-md bg-white/80 px-2 py-1.5">
-          <span className="mr-2 text-[11px] font-medium uppercase tracking-wide text-muted">Answer</span>
-          <span className="text-[17px]"><Latex latex={o.data.finalAnswer} /></span>
+        <div className={`mt-2 border-t border-current/30 pt-1.5 text-[26px] ${cls ?? ""}`} style={line(o.data.finalAnswer)}>
+          <span className="mr-2 text-[18px] opacity-70">Answer:</span>
+          <Latex latex={o.data.finalAnswer} />
         </div>
       )}
     </div>
@@ -84,13 +93,9 @@ const FONT: Record<string, string> = {
 const Item = memo(function Item({
   o,
   onMeasure,
-  animating,
-  onAnimationDone,
 }: {
   o: NotebookObject;
   onMeasure?: (id: string, height: number) => void;
-  animating?: boolean;
-  onAnimationDone?: () => void;
 }) {
   const pos = { position: "absolute", left: o.x, top: o.y, width: o.width } as const;
   switch (o.type) {
@@ -117,7 +122,7 @@ const Item = memo(function Item({
         </div>
       );
     case "AI_SOLUTION":
-      return <SolutionCard o={o} onMeasure={onMeasure} animating={animating} onAnimationDone={onAnimationDone} />;
+      return <SolutionCard o={o} onMeasure={onMeasure} />;
     default:
       return null;
   }
@@ -133,24 +138,6 @@ export function ObjectsLayer({ objects, zoom, width, height, onMeasure }: { obje
     return m;
   }, [objects]);
 
-  const [animatingIds, setAnimatingIds] = useState<Set<string>>(new Set());
-  const prevObjectsRef = useRef<string[]>([]);
-
-  useEffect(() => {
-    try {
-      const prevIds = new Set(prevObjectsRef.current);
-      const newSolutions = objects
-        .filter((o) => o.type === "AI_SOLUTION" && o.source === "AI" && !prevIds.has(o.id))
-        .map((o) => o.id);
-      if (newSolutions.length > 0) {
-        setAnimatingIds((prev) => new Set([...prev, ...newSolutions]));
-      }
-    } catch {
-      // Animation tracking is non-blocking; silently ignore errors.
-    }
-    prevObjectsRef.current = objects.map((o) => o.id);
-  }, [objects]);
-
   return (
     <div
       aria-hidden={false}
@@ -158,20 +145,7 @@ export function ObjectsLayer({ objects, zoom, width, height, onMeasure }: { obje
     >
       {objects.map((o) => {
         if (o.type === "TEXT" || o.type === "EQUATION" || o.type === "AI_SOLUTION") {
-          const animating = o.type === "AI_SOLUTION" && animatingIds.has(o.id);
-          return (
-            <Item
-              key={o.id}
-              o={o}
-              onMeasure={onMeasure}
-              animating={animating}
-              onAnimationDone={
-                animating
-                  ? () => setAnimatingIds((prev) => { const n = new Set(prev); n.delete(o.id); return n; })
-                  : undefined
-              }
-            />
-          );
+          return <Item key={o.id} o={o} onMeasure={onMeasure} />;
         }
         if (o.type === "GRAPH") return <GraphCard key={o.id} o={o as GraphObject} equationMap={equationMap} />;
         return null;
