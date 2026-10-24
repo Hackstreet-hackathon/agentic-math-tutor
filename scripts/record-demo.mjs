@@ -2,16 +2,17 @@
 // voice through a fake microphone, and the tutor's real live voice captured inside the page), combined with ffmpeg.
 //
 //   node scripts/demo-make-clips.mjs                         # once: student voice clips (needs OPENAI_API_KEY)
-//   BASE=https://agentic-math-tutor-orpin.vercel.app node scripts/record-demo.cjs
+//   BASE=https://agentic-math-tutor-orpin.vercel.app node scripts/record-demo.mjs
 //
 // Needs: playwright-core (installed), ffmpeg, a Chromium-based browser (PLAYWRIGHT_CHROMIUM_PATH, default Brave).
-const { chromium } = require("playwright-core");
-const { execFileSync } = require("node:child_process");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { chromium } from "playwright-core";
 
-const root = path.resolve(__dirname, "..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BASE = process.env.BASE || "http://localhost:3100";
 const OUT = process.env.OUT || path.join(root, "demo", "math-notebook-demo.mp4");
 const BROWSER = process.env.PLAYWRIGHT_CHROMIUM_PATH || "/opt/brave.com/brave/brave";
