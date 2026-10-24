@@ -16,18 +16,25 @@ test("conversation mode: typed turn gets an ack, a streamed reply, speech in ord
   const requests: Record<string, unknown>[] = [];
   const spoken: string[] = [];
   await page.route("**/api/ai/converse", async (route) => {
-    requests.push(route.request().postDataJSON());
+    const body = route.request().postDataJSON();
+    requests.push(body);
     await route.fulfill({
       status: 200,
       headers: { "Content-Type": "text/event-stream" },
-      body: sse([
-        ["meta", { conversationId: "c1", kind: "math", model: "gpt-4o" }],
-        ["ack", { text: "Good question, let me look at that." }],
-        ["sentence", { text: "Try factoring the equation you circled." }],
-        ["sentence", { text: "What two numbers multiply to six and add to five?" }],
-        ["state", { tutorState: { goal: "factor quadratic", stage: "check", attempts: 0 } }],
-        ["done", { messageId: "m1", text: "x", latencyMs: 10 }],
-      ]),
+      body: body.opening
+        ? sse([
+            ["meta", { conversationId: "c1", kind: "opening", model: "gpt-4o" }],
+            ["sentence", { text: "Hi! What are you learning today?" }],
+            ["done", { messageId: "m0", text: "x", latencyMs: 10 }],
+          ])
+        : sse([
+            ["meta", { conversationId: "c1", kind: "math", model: "gpt-4o" }],
+            ["ack", { text: "Good question, let me look at that." }],
+            ["sentence", { text: "Try factoring the equation you circled." }],
+            ["sentence", { text: "What two numbers multiply to six and add to five?" }],
+            ["state", { tutorState: { goal: "factor quadratic", stage: "check", attempts: 0 } }],
+            ["done", { messageId: "m1", text: "x", latencyMs: 10 }],
+          ]),
     });
   });
   await page.route("**/api/ai/tts", async (route) => {
@@ -39,13 +46,20 @@ test("conversation mode: typed turn gets an ack, a streamed reply, speech in ord
   // Typed text object so there is something selectable on the page.
   await page.getByTestId("toggle-ai").click();
   await page.getByTestId("convo-toggle").click();
-  await expect(page.getByTestId("convo-state")).toHaveText(/Listening/, { timeout: 10_000 });
+  await expect(page.getByTestId("convo-state")).toHaveText(/Listening|Speaking/, { timeout: 10_000 });
+  // Turning listening on makes the tutor speak first (no transcript, just an opening request).
+  await expect.poll(() => requests.length).toBe(1);
+  expect(requests[0]).toMatchObject({ opening: true });
+  expect(requests[0]).not.toHaveProperty("transcript");
+  requests.length = 0;
+  await expect(page.getByText("Hi! What are you learning today?")).toBeVisible();
+  await expect(page.getByTestId("convo-state")).toHaveText(/Listening/, { timeout: 15_000 });
 
   await page.getByTestId("convo-say").fill("how do I solve this");
   await page.getByTestId("convo-say").press("Enter");
 
   await expect(page.getByText("Try factoring the equation you circled.")).toBeVisible({ timeout: 10_000 });
-  await expect.poll(() => spoken.slice(0, 3)).toEqual([
+  await expect.poll(() => spoken.slice(1, 4)).toEqual([
     "Good question, let me look at that.",
     "Try factoring the equation you circled.",
     "What two numbers multiply to six and add to five?",

@@ -65,7 +65,7 @@ export function AiPanel(props: {
   onFlushSave: () => Promise<void>;
   focusSignal: number;
   /** A question the workspace wants asked right away (e.g. "Show me" on a flagged step). */
-  autoAsk?: { nonce: number; text: string; intent?: Intent } | null;
+  autoAsk?: { nonce: number; text: string; intent?: Intent; /** The student circled something: the tutor takes the lead and asks about it. */ lasso?: boolean } | null;
   onClose: () => void;
 }) {
   const { notebookId, page, editor, textSelection } = props;
@@ -96,6 +96,10 @@ export function AiPanel(props: {
             if (m.role === "USER") return [{ id: m.id, role: "user", text: m.content, context: m.contextMeta?.pageNumber ? (m.contextMeta as ContextSummary) : undefined }];
             if (m.role === "ASSISTANT" && m.structured) {
               return [{ id: m.id, role: "assistant", answer: m.structured.answer, verification: m.structured.verification, malformed: m.structured.malformed, sourceQuestion: "", region: null, messageId: m.id }];
+            }
+            // Spoken (voice conversation) replies have no structured answer: show them as plain text.
+            if (m.role === "ASSISTANT") {
+              return [{ id: m.id, role: "assistant", answer: { ...emptyAnswer("followup"), summary: m.content }, sourceQuestion: "", region: null, messageId: m.id }];
             }
             return [];
           }),
@@ -290,7 +294,11 @@ export function AiPanel(props: {
   useEffect(() => {
     if (!autoAsk || autoAsk.nonce === lastAutoAsk.current || !status?.configured) return;
     lastAutoAsk.current = autoAsk.nonce;
-    void send(autoAsk.text, autoAsk.intent);
+    // Deferred so the request starts after this render has committed (the panel may have just mounted).
+    setTimeout(() => {
+      if (autoAsk.lasso) convo.lasso();
+      else void send(autoAsk.text, autoAsk.intent);
+    }, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoAsk, status?.configured]);
 

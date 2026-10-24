@@ -44,8 +44,6 @@ const schema = z.object({
   FAST_LLM_PROVIDER: z.enum(["openai", "groq", "gemini", "none"]).default("openai"),
   FAST_LLM_MODEL: optionalString,
   GEMINI_API_KEY: optionalString,
-  /** Laya (ConvAI) System One classifier key; reserved for the voice triage step. */
-  LAYA_API_KEY: optionalString,
   /** Speaking style for gpt-4o-mini-tts, e.g. "warm, encouraging teacher". */
   OPENAI_TTS_STYLE: optionalString,
 

@@ -93,7 +93,7 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
   // "Watch my work": live tracking of the student's steps. Preferences are per-browser conveniences.
   const [watchOn, setWatchOn] = useState(false);
   const [watchVoice, setWatchVoice] = useState(true);
-  const [autoAsk, setAutoAsk] = useState<{ nonce: number; text: string; intent?: Intent } | null>(null);
+  const [autoAsk, setAutoAsk] = useState<{ nonce: number; text: string; intent?: Intent; lasso?: boolean } | null>(null);
   useEffect(() => {
     try {
       setWatchOn(localStorage.getItem("mn-watch") === "1"); // eslint-disable-line react-hooks/set-state-in-effect
@@ -109,6 +109,19 @@ function WorkspaceReady({ notebook }: { notebook: NotebookDto }) {
       /* ignore */
     }
   };
+  // Circling something with the lasso makes the tutor take the lead and ask about it, even if the panel was closed.
+  const lastLasso = useRef<unknown>(null);
+  useEffect(() => {
+    const r = editor.region;
+    if (!r || r.kind !== "lasso" || r === lastLasso.current) return;
+    lastLasso.current = r;
+    const t = setTimeout(() => {
+      setAiOpen(true);
+      setAutoAsk({ nonce: Date.now(), lasso: true, text: "" });
+    }, 350);
+    return () => clearTimeout(t);
+  }, [editor.region]);
+
   const watcher = useWorkWatcher({ enabled: watchOn, voice: watchVoice, notebookId: notebook.id, page });
 
   // Poll text-extraction status while any document is still processing; the notebook stays usable meanwhile.

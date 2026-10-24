@@ -15,14 +15,19 @@ export const IDLE_STATE: TutorState = { goal: "", stage: "idle", attempts: 0 };
 export const converseRequestSchema = chatRequestSchema
   .omit({ message: true, intent: true })
   .extend({
-    /** What the student said (already transcribed). */
-    transcript: z.string().trim().min(1).max(2000),
+    /** What the student said (already transcribed). Absent on the tutor's opening turn. */
+    transcript: z.string().trim().max(2000).optional(),
+    /** True when listening has just started and the tutor should speak first. */
+    opening: z.boolean().optional(),
+    /** True when the student has just circled something and the tutor takes the lead. */
+    lasso: z.boolean().optional(),
     tutorState: tutorStateSchema.nullish(),
-  });
+  })
+  .refine((b) => b.opening || b.lasso || Boolean(b.transcript), { message: "Say something first", path: ["transcript"] });
 export type ConverseRequest = z.infer<typeof converseRequestSchema>;
 
 export const triageSchema = z.object({
-  kind: z.enum(["smalltalk", "math", "control"]).catch("math"),
+  kind: z.enum(["smalltalk", "offtopic", "math", "control"]).catch("math"),
   control: z.enum(["stop", "repeat", "stop_listening"]).nullable().catch(null),
   /** One short spoken line to say while the main model thinks (maths only). */
   ack: z.string().max(160).nullable().catch(null),
@@ -34,14 +39,14 @@ export const TRIAGE_JSON_SCHEMA = {
   additionalProperties: false,
   required: ["kind", "control", "ack"],
   properties: {
-    kind: { type: "string", enum: ["smalltalk", "math", "control"] },
+    kind: { type: "string", enum: ["smalltalk", "offtopic", "math", "control"] },
     control: { type: ["string", "null"], enum: ["stop", "repeat", "stop_listening", null] },
     ack: { type: ["string", "null"] },
   },
 } as const;
 
 export type ConverseEvent =
-  | { event: "meta"; data: { conversationId: string; kind: Triage["kind"]; model: string } }
+  | { event: "meta"; data: { conversationId: string; kind: Triage["kind"] | "opening" | "lasso"; model: string } }
   | { event: "control"; data: { control: NonNullable<Triage["control"]> } }
   /** A short filler to speak immediately while the real answer is being prepared. */
   | { event: "ack"; data: { text: string } }
@@ -80,3 +85,7 @@ export function looksLikeAnswer(t: string): boolean {
   const words = t.trim().split(/\s+/).length;
   return words <= 2 || ANSWER_START.test(t.trim()) || MATHY.test(t);
 }
+
+const MATH_TERMS = /[0-9]\s*[=+\-*/^]|[=^√∫∑]|\b(equations?|solve|solving|derivatives?|differentiat\w*|integrals?|integrat\w*|limits?|matrix|matrices|determinants?|inverse|factor(ing|ise|ize|s)?|expand|simplif\w+|quadratic|polynomials?|fractions?|algebra\w*|calculus|geometry|trigonometry|theorems?|formulas?|graphs?|slope|gradient|angles?|triangles?|logarithms?|exponents?|sine|cosine|tangent|probability|statistics|median|variance|vectors?|prime numbers?|percent\w*|ratio|proof|prove)\b/i;
+/** Unmistakable maths vocabulary: route to the tutor without asking the fast model (it can be over-strict). */
+export const hasMathTerms = (t: string) => MATH_TERMS.test(t);

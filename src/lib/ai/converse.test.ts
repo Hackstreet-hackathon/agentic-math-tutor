@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { looksLikeAnswer, isActiveExchange, isPhantomTranscript, looksMathy, quickControl, triageSchema } from "./converse";
+import { converseRequestSchema, hasMathTerms, looksLikeAnswer, isActiveExchange, isPhantomTranscript, looksMathy, quickControl, triageSchema } from "./converse";
 
 describe("converse helpers", () => {
   it("detects control phrases without a model", () => {
@@ -32,10 +32,23 @@ describe("converse helpers", () => {
   it("tolerates a bad triage reply", () => {
     expect(triageSchema.parse({ kind: "weird" }).kind).toBe("math");
     expect(triageSchema.parse({ kind: "smalltalk", control: null, ack: null }).kind).toBe("smalltalk");
+    expect(triageSchema.parse({ kind: "offtopic", control: null, ack: null }).kind).toBe("offtopic");
   });
 
   it("tells answers apart from a change of subject mid-exercise", () => {
     for (const t of ["two and three", "yes", "I think it's x equals negative two", "is it five", "I don't know", "um"]) expect(looksLikeAnswer(t)).toBe(true);
     for (const t of ["Capital of France.", "what's the weather like today", "tell me a joke please"]) expect(looksLikeAnswer(t)).toBe(false);
+  });
+
+  it("allows the tutor's opening turn without a transcript, but not an empty student turn", () => {
+    const base = { notebookId: "n1", pageId: "p1" };
+    expect(converseRequestSchema.safeParse({ ...base, opening: true }).success).toBe(true);
+    expect(converseRequestSchema.safeParse({ ...base, transcript: "hi" }).success).toBe(true);
+    expect(converseRequestSchema.safeParse({ ...base }).success).toBe(false);
+  });
+
+  it("recognises maths vocabulary but not general chat", () => {
+    for (const t of ["can you explain what a derivative is", "how do I factor this quadratic", "what is 3 + 4", "teach me about matrices"]) expect(hasMathTerms(t)).toBe(true);
+    for (const t of ["tell me a joke about cats", "who won the football world cup", "write me a python function to sort a list", "how do you make pancakes"]) expect(hasMathTerms(t)).toBe(false);
   });
 });

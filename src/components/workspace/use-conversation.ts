@@ -76,19 +76,25 @@ export function useConversation(opts: Options) {
     conversationId.current = opts.conversationId;
   }, [opts.conversationId]);
 
-  /** One full turn: transcript in, spoken answer out. */
+  /**
+   * One full turn. `transcript` is what the student said; `mode` is set when the tutor speaks first
+   * ("opening": listening just started, "lasso": the student circled something). Answers are spoken only
+   * while listening is on; otherwise the same turn runs as text in the panel.
+   */
   const handleTranscript = useCallback(
-    async (transcript: string) => {
+    async (transcript: string | null, mode?: "opening" | "lasso") => {
       const cur = o.current;
       if (!cur.pageId) return;
       queue.current ??= new SpeechQueue();
       const q = queue.current;
+      const voiceOn = stateRef.current !== "off";
+      const set = (s: ConvoState) => voiceOn && setState(s);
       const ac = new AbortController();
       abort.current = ac;
       q.resetLog();
 
-      setState("thinking");
-      cur.onUser(transcript);
+      set("thinking");
+      if (transcript !== null) cur.onUser(transcript);
       let text = "";
       let started = false;
       const begin = () => {
@@ -97,16 +103,16 @@ export function useConversation(opts: Options) {
         cur.onTutorStart();
       };
       try {
-        const payload = await cur.getPayload();
+        const payload = mode === "opening" ? null : await cur.getPayload();
         await streamConverse(
           {
             notebookId: cur.notebookId,
             pageId: cur.pageId,
             conversationId: conversationId.current,
-            transcript,
-            selection: payload.selection,
-            image: payload.image,
-            recognizedHandwriting: payload.recognizedHandwriting,
+            ...(mode === "opening" ? { opening: true } : mode === "lasso" ? { lasso: true } : { transcript: transcript ?? "" }),
+            selection: payload?.selection ?? null,
+            image: payload?.image ?? null,
+            recognizedHandwriting: payload?.recognizedHandwriting,
             tutorState: tutorState.current,
           },
           {
@@ -115,15 +121,16 @@ export function useConversation(opts: Options) {
               cur.onConversationId(m.conversationId);
             },
             onAck: (t) => {
+              if (!voiceOn) return;
               q.enqueue(t);
-              setState("speaking");
+              set("speaking");
             },
             onSentence: (t) => {
               begin();
               text += (text ? " " : "") + t;
               cur.onTutorText(text);
-              q.enqueue(t);
-              setState("speaking");
+              if (voiceOn) q.enqueue(t);
+              set("speaking");
             },
             onState: (s) => {
               tutorState.current = s;
@@ -137,7 +144,7 @@ export function useConversation(opts: Options) {
           ac.signal,
         );
         if (started) cur.onTutorDone();
-        await q.whenIdle();
+        if (voiceOn) await q.whenIdle();
       } catch (e) {
         if ((e as Error).name !== "AbortError") {
           q.cancel();
@@ -146,11 +153,18 @@ export function useConversation(opts: Options) {
         if (started) cur.onTutorDone();
       } finally {
         if (abort.current === ac) abort.current = null;
-        if (stateRef.current !== "off" && !ac.signal.aborted) setState("listening");
+        if (voiceOn && stateRef.current !== "off" && !ac.signal.aborted) setState("listening");
       }
     },
     [setState],
   );
+
+  /** The student circled something: the tutor takes the lead and asks about it (spoken when listening is on). */
+  const lasso = useCallback(() => {
+    queue.current?.cancel();
+    abort.current?.abort();
+    void handleTranscript(null, "lasso");
+  }, [handleTranscript]);
 
   /** Type instead of speaking (noisy room, tests): same pipeline from the transcript on. */
   const say = useCallback(
@@ -164,8 +178,11 @@ export function useConversation(opts: Options) {
     [handleTranscript],
   );
 
+  const greeted = useRef(false);
+
   useEffect(() => {
     if (!opts.active) {
+      greeted.current = false;
       queue.current?.cancel();
       abort.current?.abort();
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -325,6 +342,11 @@ export function useConversation(opts: Options) {
 
         setState("listening");
         tick = setInterval(onTick, TICK_MS);
+        // The tutor speaks first: asks what they're learning, or opens from the PDF / notes on the page.
+        if (!greeted.current) {
+          greeted.current = true;
+          void handleTranscript(null, "opening");
+        }
       } catch (e) {
         const name = (e as DOMException).name;
         o.current.onError(
@@ -352,5 +374,5 @@ export function useConversation(opts: Options) {
     };
   }, [opts.active, setState, handleTranscript]);
 
-  return { state, say, tutorState };
+  return { state, say, lasso, tutorState };
 }
