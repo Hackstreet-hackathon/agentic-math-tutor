@@ -84,6 +84,8 @@ function classify(e: unknown): PdfError {
   if (name === "InvalidPDFException" || name === "FormatError" || name === "MissingPDFException") {
     return new PdfError("invalid", "This file is not a valid or complete PDF");
   }
+  // Never include document content; the error name/message are enough to diagnose a deployment problem.
+  console.error("pdf read failed:", name ?? "unknown", String((e as { message?: string })?.message ?? e).slice(0, 300));
   return new PdfError("unknown", "Could not read this PDF");
 }
 

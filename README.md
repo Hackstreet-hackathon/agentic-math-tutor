@@ -110,6 +110,10 @@ Needs `STT_PROVIDER=openai` and `TTS_PROVIDER=openai`. The fast model is set wit
 - No OCR for scanned PDF pages; they are flagged "Scanned page · no selectable text".
 - Rate limiting is per-user, in-memory, and resets on server restart.
 
+## Deploying (Vercel + Supabase)
+
+The app runs on Vercel with a Supabase Postgres database. Set these on the Vercel project (Production): `DATABASE_URL` (Supabase *transaction pooler*, port 6543), `DATABASE_URL_UNPOOLED` (*session pooler*, port 5432, used only for migrations, which `vercel-build` applies), `SESSION_SECRET`, `STORAGE_PROVIDER=db` (PDFs in Postgres; use `s3` plus the `OBJECT_STORAGE_*` settings for a Supabase Storage bucket), the OpenAI settings, `STT_PROVIDER=openai` and `TTS_PROVIDER=openai`. Supabase connection strings need `?uselibpqcompat=true&sslmode=require`. `vercel.json` pins the functions to Mumbai (`bom1`) next to the database. Vercel limits request bodies to about 4.5 MB, so large PDFs need direct-to-storage uploads.
+
 ## Commands
 
 | Command | What it does |
