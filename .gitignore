@@ -11,3 +11,4 @@ src/generated
 public/pdfjs
 .stack
 .vercel
+.env.supabase
