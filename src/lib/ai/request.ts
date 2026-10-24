@@ -32,6 +32,8 @@ export const chatRequestSchema = z.object({
     .max(MAX_IMAGE_CHARS)
     .regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/, "Image must be a base64 PNG, JPEG or WebP data URL")
     .nullish(),
+  /** Client-side recognized LaTeX from ink strokes (best-effort, may be null). */
+  recognizedHandwriting: z.string().max(500).nullish(),
 });
 export type ChatRequest = z.infer<typeof chatRequestSchema>;
 

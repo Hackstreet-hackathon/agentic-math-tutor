@@ -7,6 +7,8 @@ import { ChatError, getAiStatus, getConversation, streamChat, type AiStatus } fr
 import type { PageDto } from "@/lib/client/api";
 import { captureRegionImage } from "@/lib/client/region-image";
 import type { Rect } from "@/lib/notebook/geometry";
+import type { InkObject, NotebookObject } from "@/lib/notebook/schemas";
+import { recognizeStrokes } from "@/lib/notebook/stroke-recognize";
 import { cn } from "@/lib/utils";
 import type { EditorState } from "./editor";
 import { Latex } from "./math";
@@ -130,11 +132,25 @@ export function AiPanel(props: {
       await props.onFlushSave();
 
       const region = editor.region;
-      const hasInk = page.objects.some((o) => o.type === "INK" && editor.selectedIds.includes(o.id));
+      const selectionIds = new Set(editor.selectedIds);
+      const hasInk = page.objects.some((o) => o.type === "INK" && selectionIds.has(o.id));
       let image: string | null = null;
       if (region && status.capabilities?.vision && (page.pageType === "PDF" || hasInk)) {
         const pdfCanvas = document.querySelector<HTMLCanvasElement>('[data-testid="pdf-background"] canvas');
         image = captureRegionImage({ page, bounds: region.bounds, objects: page.objects, pdfCanvas });
+      }
+
+      // Run client-side stroke recognition on selected ink objects.
+      const inkObjects = (page.objects as NotebookObject[]).filter(
+        (o): o is InkObject => o.type === "INK" && selectionIds.has(o.id),
+      );
+      let recognizedHandwriting: string | undefined;
+      try {
+        const recognized = inkObjects.length > 0 ? recognizeStrokes(inkObjects) : null;
+        recognizedHandwriting = recognized?.latex ?? undefined;
+      } catch {
+        // Recognition is best-effort; never block the AI request on errors.
+        recognizedHandwriting = undefined;
       }
 
       const body: ChatRequest = {
@@ -147,6 +163,7 @@ export function AiPanel(props: {
           ? { region: region ? { kind: region.kind, polygon: region.polygon, bounds: region.bounds } : null, objectIds: editor.selectedIds, text: textSelection || null }
           : null,
         image,
+        recognizedHandwriting,
       };
 
       const userId = nextId();

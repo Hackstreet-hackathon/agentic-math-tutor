@@ -31,6 +31,8 @@ export interface AgentContext {
   references: { page: number; source: "pdf" | "notebook"; snippet: string }[];
   scannedPageNoText: boolean;
   hasPageContent: boolean;
+  /** Client-side recognized LaTeX from ink strokes, if available. */
+  recognizedHandwriting: string | null;
 }
 
 const LIMITS = { selected: 3000, nearby: 1500, page: 6000, step: 300, ref: 480 } as const;
@@ -151,6 +153,7 @@ export async function buildAgentContext(opts: { userId: string; body: ChatReques
     references,
     scannedPageNoText: scanned && items.length === 0,
     hasPageContent: items.length > 0 || typedOnPage.length > 0,
+    recognizedHandwriting: body.recognizedHandwriting ?? null,
   };
 }
 

@@ -1,6 +1,7 @@
 "use client";
-import { memo, useLayoutEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { EquationObject, GraphObject, NotebookObject } from "@/lib/notebook/schemas";
+import { InkAnimator } from "./ink-animator";
 import { GraphCard } from "./graph-panel";
 import { Latex } from "./math";
 import { MathText } from "./math-text";
@@ -14,20 +15,42 @@ const VERIFY_LABEL: Record<string, { text: string; tone: string }> = {
 };
 
 /** AI-written solution card: deliberately distinct from the student's own ink and text. */
-function SolutionCard({ o, onMeasure }: { o: Extract<NotebookObject, { type: "AI_SOLUTION" }>; onMeasure?: (id: string, height: number) => void }) {
+function SolutionCard({
+  o,
+  onMeasure,
+  animating,
+  onAnimationDone,
+}: {
+  o: Extract<NotebookObject, { type: "AI_SOLUTION" }>;
+  onMeasure?: (id: string, height: number) => void;
+  animating?: boolean;
+  onAnimationDone?: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const h = ref.current?.offsetHeight;
     if (h && Math.abs(h - o.height) > 2) onMeasure?.(o.id, h);
   });
   const v = VERIFY_LABEL[o.data.verificationStatus] ?? VERIFY_LABEL.PENDING!;
+  const animText = o.data.finalAnswer ?? o.data.steps[0]?.latex ?? "";
+  const animColor = o.data.verificationStatus === "VERIFIED" ? "#16a34a" : "#1e40af";
   return (
     <div
       ref={ref}
       data-testid="ai-solution"
       style={{ position: "absolute", left: o.x, top: o.y, width: o.width }}
-      className="rounded-lg border-l-4 border-accent bg-[#eef1ff]/80 px-3 py-2 text-[13px] leading-snug text-ink shadow-sm"
+      className="relative rounded-lg border-l-4 border-accent bg-[#eef1ff]/80 px-3 py-2 text-[13px] leading-snug text-ink shadow-sm"
     >
+      {animating && animText && (
+        <InkAnimator
+          text={animText}
+          width={o.width - 24}
+          height={Math.min(80, o.height)}
+          color={animColor}
+          onDone={onAnimationDone}
+          className="absolute inset-x-0 top-0 pointer-events-none z-10"
+        />
+      )}
       <div className="mb-1.5 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-accent">
         <span>AI solution</span>
         <span className={`rounded bg-white/80 px-1.5 py-0.5 normal-case tracking-normal ${v.tone}`}>{v.text}</span>
@@ -58,7 +81,17 @@ const FONT: Record<string, string> = {
   mono: "ui-monospace, SFMono-Regular, Menlo, monospace",
 };
 
-const Item = memo(function Item({ o, onMeasure }: { o: NotebookObject; onMeasure?: (id: string, height: number) => void }) {
+const Item = memo(function Item({
+  o,
+  onMeasure,
+  animating,
+  onAnimationDone,
+}: {
+  o: NotebookObject;
+  onMeasure?: (id: string, height: number) => void;
+  animating?: boolean;
+  onAnimationDone?: () => void;
+}) {
   const pos = { position: "absolute", left: o.x, top: o.y, width: o.width } as const;
   switch (o.type) {
     case "TEXT":
@@ -84,7 +117,7 @@ const Item = memo(function Item({ o, onMeasure }: { o: NotebookObject; onMeasure
         </div>
       );
     case "AI_SOLUTION":
-      return <SolutionCard o={o} onMeasure={onMeasure} />;
+      return <SolutionCard o={o} onMeasure={onMeasure} animating={animating} onAnimationDone={onAnimationDone} />;
     default:
       return null;
   }
@@ -100,13 +133,46 @@ export function ObjectsLayer({ objects, zoom, width, height, onMeasure }: { obje
     return m;
   }, [objects]);
 
+  const [animatingIds, setAnimatingIds] = useState<Set<string>>(new Set());
+  const prevObjectsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    try {
+      const prevIds = new Set(prevObjectsRef.current);
+      const newSolutions = objects
+        .filter((o) => o.type === "AI_SOLUTION" && o.source === "AI" && !prevIds.has(o.id))
+        .map((o) => o.id);
+      if (newSolutions.length > 0) {
+        setAnimatingIds((prev) => new Set([...prev, ...newSolutions]));
+      }
+    } catch {
+      // Animation tracking is non-blocking; silently ignore errors.
+    }
+    prevObjectsRef.current = objects.map((o) => o.id);
+  }, [objects]);
+
   return (
     <div
       aria-hidden={false}
       style={{ position: "absolute", left: 0, top: 0, width, height, transform: `scale(${zoom})`, transformOrigin: "0 0", pointerEvents: "none" }}
     >
       {objects.map((o) => {
-        if (o.type === "TEXT" || o.type === "EQUATION" || o.type === "AI_SOLUTION") return <Item key={o.id} o={o} onMeasure={onMeasure} />;
+        if (o.type === "TEXT" || o.type === "EQUATION" || o.type === "AI_SOLUTION") {
+          const animating = o.type === "AI_SOLUTION" && animatingIds.has(o.id);
+          return (
+            <Item
+              key={o.id}
+              o={o}
+              onMeasure={onMeasure}
+              animating={animating}
+              onAnimationDone={
+                animating
+                  ? () => setAnimatingIds((prev) => { const n = new Set(prev); n.delete(o.id); return n; })
+                  : undefined
+              }
+            />
+          );
+        }
         if (o.type === "GRAPH") return <GraphCard key={o.id} o={o as GraphObject} equationMap={equationMap} />;
         return null;
       })}

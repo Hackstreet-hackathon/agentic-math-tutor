@@ -61,10 +61,13 @@ export function buildMessages(opts: {
   ];
   if (ctx.region) trusted.push(`The student circled/boxed a region of this page${ctx.selectedText || ctx.selectedObjects.length ? "" : " (nothing readable was found under it)"}.`);
   if (ctx.handwritingStrokesInSelection > 0) {
+    const recog = ctx.recognizedHandwriting ? ` recognized="${ctx.recognizedHandwriting.replace(/"/g, "'")}"` : "";
     trusted.push(
       imageDataUrl && visionAvailable
-        ? `<handwriting strokes="${ctx.handwritingStrokesInSelection}">The selection contains the student's handwriting; it is visible in the attached image.</handwriting>`
-        : `<handwriting strokes="${ctx.handwritingStrokesInSelection}">The selection contains handwriting that you CANNOT see (no image is available). Do not guess what it says; ask the student to retype it as an equation or describe it.</handwriting>`,
+        ? `<handwriting strokes="${ctx.handwritingStrokesInSelection}"${recog}>The selection contains the student's handwriting; it is visible in the attached image.</handwriting>`
+        : ctx.recognizedHandwriting
+          ? `<handwriting strokes="${ctx.handwritingStrokesInSelection}"${recog}>The selection contains handwriting. Recognition suggests: ${ctx.recognizedHandwriting}. Verify against the student's description.</handwriting>`
+          : `<handwriting strokes="${ctx.handwritingStrokesInSelection}">The selection contains handwriting that you CANNOT see (no image is available). Do not guess what it says; ask the student to retype it as an equation or describe it.</handwriting>`,
     );
   }
   if (ctx.scannedPageNoText) trusted.push("This PDF page is a scan with no text layer, so no printed text is available" + (imageDataUrl && visionAvailable ? "; read it from the attached image." : "."));

@@ -22,6 +22,7 @@ const ctx = (over: Partial<AgentContext> = {}): AgentContext => ({
   references: [],
   scannedPageNoText: false,
   hasPageContent: true,
+  recognizedHandwriting: null,
   ...over,
 });
 const textOf = (m: { content: unknown }) => (typeof m.content === "string" ? m.content : (m.content as { type: string; text?: string }[]).map((p) => p.text ?? "[image]").join("\n"));
