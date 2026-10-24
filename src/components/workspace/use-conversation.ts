@@ -4,7 +4,6 @@ import { IDLE_STATE, isPhantomTranscript, type ConverseRequest, type TutorState 
 import { ChatError, streamConverse } from "@/lib/client/ai";
 import { isEcho } from "@/lib/client/echo";
 import { SpeechQueue } from "@/lib/client/speech-queue";
-import { setConversationActive } from "@/lib/client/speech-state";
 import { looksUnfinished } from "@/lib/client/utterance";
 import { Vad, type VadState } from "@/lib/client/vad";
 import { encodeWav } from "@/lib/client/wav";
@@ -25,7 +24,7 @@ export interface TurnPayload {
   recognizedHandwriting?: string;
 }
 
-interface Options {
+export interface Options {
   active: boolean;
   notebookId: string;
   pageId: string | undefined;
@@ -270,11 +269,6 @@ export function useConversation(opts: Options) {
     window.addEventListener("mn-audio-blocked", blocked);
     return () => window.removeEventListener("mn-audio-blocked", blocked);
   }, []);
-
-  useEffect(() => {
-    setConversationActive(opts.active);
-    return () => setConversationActive(false);
-  }, [opts.active]);
 
   useEffect(() => {
     if (!opts.active) {

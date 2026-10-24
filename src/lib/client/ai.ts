@@ -8,6 +8,7 @@ export interface AiStatus {
   provider?: string;
   model?: string;
   capabilities?: { vision: boolean; streaming: boolean };
+  voiceEngine?: "realtime" | "pipeline";
   reason?: string;
 }
 

@@ -25,3 +25,12 @@ export async function waitSaved(page: Page) {
 
 export const inkCount = async (page: Page) => Number(await page.getByTestId("page-canvas").getAttribute("data-ink-count"));
 export const objectCount = async (page: Page) => Number(await page.getByTestId("page-canvas").getAttribute("data-object-count"));
+
+/** Run the voice tests against the Whisper -> tutor -> TTS pipeline (the live-call engine is the default). */
+export async function usePipelineVoice(page: Page) {
+  await page.route("**/api/ai/status", async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    await route.fulfill({ response: res, json: { ...body, voiceEngine: "pipeline" } });
+  });
+}

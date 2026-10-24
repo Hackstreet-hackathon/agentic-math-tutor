@@ -1,6 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { createNotebook } from "./helpers";
+import { createNotebook, usePipelineVoice } from "./helpers";
 
 // Fresh browser profile: no saved preferences, so the defaults apply. A fake microphone lets getUserMedia succeed.
 test.use({
@@ -15,6 +15,7 @@ test.use({
 const sse = (events: [string, unknown][]) => events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join("");
 
 test("the tutor is open and talking as soon as a notebook opens, and every line lands in the panel", async ({ page }) => {
+  await usePipelineVoice(page);
   const requests: Record<string, unknown>[] = [];
   await page.route("**/api/ai/converse", async (route) => {
     const body = route.request().postDataJSON();
@@ -55,6 +56,7 @@ test("the tutor is open and talking as soon as a notebook opens, and every line 
 });
 
 test("without a click the browser would block sound, so the tutor asks for a tap first and then starts", async ({ page }) => {
+  await usePipelineVoice(page);
   const requests: Record<string, unknown>[] = [];
   await page.route("**/api/ai/converse", async (route) => {
     requests.push(route.request().postDataJSON());
@@ -76,6 +78,7 @@ test("without a click the browser would block sound, so the tutor asks for a tap
 });
 
 test("a flagged mistake and its fix are raised by the tutor inside the conversation", async ({ page }) => {
+  await usePipelineVoice(page);
   const events: { kind?: string; step?: string; hint?: string }[] = [];
   let watchCalls = 0;
   await page.route("**/api/ai/converse", async (route) => {
@@ -128,6 +131,7 @@ test("a flagged mistake and its fix are raised by the tutor inside the conversat
 });
 
 test("when the voice service fails the student is told, instead of hearing nothing", async ({ page }) => {
+  await usePipelineVoice(page);
   await page.route("**/api/ai/converse", (route) =>
     route.fulfill({ status: 200, headers: { "Content-Type": "text/event-stream" }, body: sse([["meta", { conversationId: "c1", kind: "opening", model: "m" }], ["sentence", { text: "Hi! What are you learning today?" }], ["done", { messageId: "m0", text: "x", latencyMs: 1 }]]) }),
   );

@@ -33,6 +33,10 @@ const schema = z.object({
   STT_PROVIDER: z.enum(["openai", "gradium", "none"]).default("none"),
   TTS_PROVIDER: z.enum(["openai", "gradium", "none"]).default("none"),
   /** Speech-to-text model for STT_PROVIDER=openai (default whisper-1; gpt-4o-mini-transcribe also works). */
+  /** "realtime" = OpenAI Realtime (speech-in/speech-out over WebRTC, ~0.5-1 s); "pipeline" = mic -> Whisper -> tutor -> TTS. */
+  VOICE_ENGINE: z.enum(["realtime", "pipeline"]).default("realtime"),
+  OPENAI_REALTIME_MODEL: optionalString,
+  OPENAI_REALTIME_VOICE: optionalString,
   OPENAI_STT_MODEL: optionalString,
   /** Language hint for speech recognition (ISO 639-1); "en" avoids random-language guesses on noise. */
   OPENAI_STT_LANGUAGE: optionalString,

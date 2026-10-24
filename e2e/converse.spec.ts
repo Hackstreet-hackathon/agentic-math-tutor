@@ -1,6 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { createNotebook } from "./helpers";
+import { createNotebook, usePipelineVoice } from "./helpers";
 
 // A fake microphone (silence) lets the real getUserMedia / VAD code run headlessly.
 test.use({
@@ -14,6 +14,7 @@ test.use({
 const sse = (events: [string, unknown][]) => events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join("");
 
 test("conversation mode: typed turn gets an ack, a streamed reply, speech in order, and the selection travels along", async ({ page }) => {
+  await usePipelineVoice(page);
   const requests: Record<string, unknown>[] = [];
   const spoken: string[] = [];
   await page.route("**/api/ai/converse", async (route) => {

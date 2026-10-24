@@ -13,7 +13,9 @@ import { cn } from "@/lib/utils";
 import type { EditorState } from "./editor";
 import { Latex } from "./math";
 import { MathText } from "./math-text";
+import { setConversationActive } from "@/lib/client/speech-state";
 import { useConversation, type TurnPayload } from "./use-conversation";
+import { useRealtimeConversation } from "./use-realtime";
 import { VoiceInput } from "./voice-input";
 import { VoiceListener } from "./voice-listener";
 import { VoiceOutput } from "./voice-output";
@@ -74,6 +76,7 @@ export function AiPanel(props: {
   const [status, setStatus] = useState<AiStatus | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [historyReady, setHistoryReady] = useState(false);
   const [input, setInput] = useState("");
   const [voiceActive, setVoiceActive] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -91,7 +94,9 @@ export function AiPanel(props: {
       .catch(() => !cancelled && setStatus({ configured: false, reason: "Could not reach the server." }));
     getConversation(notebookId)
       .then((c) => {
-        if (cancelled || !c) return;
+        if (cancelled) return;
+        setHistoryReady(true);
+        if (!c) return;
         setConversationId(c.id);
         setItems(
           c.messages.flatMap<Item>((m) => {
@@ -107,7 +112,7 @@ export function AiPanel(props: {
           }),
         );
       })
-      .catch(() => undefined);
+      .catch(() => !cancelled && setHistoryReady(true));
     return () => {
       cancelled = true;
       abortRef.current?.abort();
@@ -190,8 +195,11 @@ export function AiPanel(props: {
       window.removeEventListener("keydown", ok);
     };
   }, [gesture]);
-  const convo = useConversation({
-    active: convoOn && gesture && Boolean(status?.configured),
+  // Two voice engines: the Realtime API (fast, streaming) or the Whisper -> tutor -> TTS pipeline (fallback).
+  const [engineOverride, setEngineOverride] = useState<"pipeline" | null>(null);
+  const engine: "realtime" | "pipeline" = engineOverride ?? status?.voiceEngine ?? "pipeline";
+  const voiceReady = convoOn && gesture && historyReady && Boolean(status?.configured);
+  const convoOpts: Omit<Parameters<typeof useConversation>[0], "active"> = {
     notebookId,
     pageId: page.id,
     conversationId,
@@ -214,7 +222,30 @@ export function AiPanel(props: {
     onError: (message) => setConvoError(message),
     onNotice: setConvoError,
     onStopListening: () => setConvoOn(false),
+  };
+  const pipeline = useConversation({ ...convoOpts, active: voiceReady && engine === "pipeline" });
+  const realtime = useRealtimeConversation({
+    ...convoOpts,
+    active: voiceReady && engine === "realtime",
+    onFallback: (why) => {
+      setConvoError(`Live voice isn’t available (${why}) — using the standard voice instead.`);
+      setEngineOverride("pipeline");
+    },
   });
+  const convo = engine === "realtime" ? realtime : pipeline;
+  useEffect(() => {
+    setConversationActive(voiceReady);
+    return () => setConversationActive(false);
+  }, [voiceReady]);
+
+  // Tell a live call what is circled/selected (or that nothing is) whenever that changes.
+  const selectionKey = `${page.id}|${editor.region ? editor.region.polygon.length + ":" + Math.round(editor.region.bounds.x) + "," + Math.round(editor.region.bounds.y) : ""}|${editor.selectedIds.join(",")}|${textSelection}`;
+  useEffect(() => {
+    if (engine !== "realtime" || !voiceReady) return;
+    const t = setTimeout(() => void realtime.refreshContext(), 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey, engine, voiceReady]);
 
   /* ----- sending ----- */
   const send = useCallback(

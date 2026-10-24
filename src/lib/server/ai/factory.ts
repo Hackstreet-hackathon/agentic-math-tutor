@@ -43,6 +43,8 @@ export interface AiStatus {
   provider?: string;
   model?: string;
   capabilities?: Pick<LLMCapabilities, "vision" | "streaming">;
+  /** How voice conversations run: the Realtime API or the Whisper -> tutor -> TTS pipeline. */
+  voiceEngine?: "realtime" | "pipeline";
   reason?: string;
 }
 
@@ -50,5 +52,5 @@ export interface AiStatus {
 export function aiStatus(): AiStatus {
   const r = getLLM();
   if (!r.ok) return { configured: false, reason: r.reason };
-  return { configured: true, provider: r.provider.id, model: r.provider.model, capabilities: { vision: r.provider.capabilities.vision, streaming: r.provider.capabilities.streaming } };
+  return { configured: true, provider: r.provider.id, model: r.provider.model, capabilities: { vision: r.provider.capabilities.vision, streaming: r.provider.capabilities.streaming }, voiceEngine: env().VOICE_ENGINE };
 }
