@@ -1,0 +1,9 @@
+.claude
+.mcp.json
+.stack
+storage-data
+test-results
+playwright-report
+e2e
+.env
+.env.*
