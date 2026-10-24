@@ -13,6 +13,9 @@ import { cn } from "@/lib/utils";
 import type { EditorState } from "./editor";
 import { Latex } from "./math";
 import { MathText } from "./math-text";
+import { VoiceInput } from "./voice-input";
+import { VoiceListener } from "./voice-listener";
+import { VoiceOutput } from "./voice-output";
 
 type Item =
   | { id: string; role: "user"; text: string; context?: ContextSummary }
@@ -67,6 +70,7 @@ export function AiPanel(props: {
   const [items, setItems] = useState<Item[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  const [voiceActive, setVoiceActive] = useState(false);
   const [busy, setBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -311,6 +315,14 @@ export function AiPanel(props: {
             void send(input);
           }}
         >
+          <VoiceListener
+            active={voiceActive}
+            onToggle={() => setVoiceActive((v) => !v)}
+            onMathQuestion={(text) => {
+              setInput(text);
+              void send(text);
+            }}
+          />
           <textarea
             ref={inputRef}
             data-testid="ai-input"
@@ -328,6 +340,10 @@ export function AiPanel(props: {
               }
             }}
             className="min-h-[2.5rem] flex-1 resize-none rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-accent disabled:bg-surface"
+          />
+          <VoiceInput
+            onTranscript={(text) => setInput((prev) => prev ? prev + " " + text : text)}
+            disabled={!status?.configured}
           />
           {busy ? (
             <button type="button" aria-label="Stop" onClick={stop} data-testid="ai-stop" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-ink text-white">
@@ -508,6 +524,9 @@ function AnswerCard({
               {q}
             </button>
           ))}
+          {!pending && (a.steps.length > 0 || a.finalAnswer) && (
+            <VoiceOutput steps={a.steps} finalAnswer={a.finalAnswer} />
+          )}
         </div>
       )}
     </article>
